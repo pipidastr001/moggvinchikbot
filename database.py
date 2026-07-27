@@ -20,9 +20,15 @@ class Database:
                 photos TEXT,
                 ratings TEXT,
                 avg_rating TEXT DEFAULT 'Нет оценок',
-                is_active INTEGER DEFAULT 1
+                is_active INTEGER DEFAULT 1,
+                display_name TEXT
             )
         ''')
+        # Добавляем колонку display_name если её нет (для старых баз)
+        try:
+            self.cursor.execute('ALTER TABLE users ADD COLUMN display_name TEXT')
+        except:
+            pass
         self.conn.commit()
     
     def create_user(self, user_id, username, first_name):
@@ -44,6 +50,13 @@ class Database:
         self.cursor.execute(
             'UPDATE users SET photos = ?, is_active = 1 WHERE user_id = ?',
             (photos_json, user_id)
+        )
+        self.conn.commit()
+    
+    def update_display_name(self, user_id, display_name):
+        self.cursor.execute(
+            'UPDATE users SET display_name = ? WHERE user_id = ?',
+            (display_name, user_id)
         )
         self.conn.commit()
     
