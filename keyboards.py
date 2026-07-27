@@ -10,6 +10,11 @@ def gender_keyboard():
     keyboard.add(types.KeyboardButton("М"), types.KeyboardButton("Ж"))
     return keyboard
 
+def photos_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(types.KeyboardButton("Готово"))
+    return keyboard
+
 def main_menu_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton("Рейтить"), types.KeyboardButton("Моя анкета"))

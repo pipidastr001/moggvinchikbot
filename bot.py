@@ -7,11 +7,15 @@ import database
 from keyboards import *
 from states import RegistrationStates
 from ratings import get_queue_for_user
+from flask import Flask, request
+import threading
+import time
+import os
 
 TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
 
 state_storage = StateMemoryStorage()
-bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
+bot = telebot.TeleBot(TOKEN, state_storage=state_storage, threaded=False)
 
 rating_notifications = {}
 
@@ -37,8 +41,7 @@ def start(message):
     
     database.db.create_user(user_id, username, first_name)
     
-    welcome_text = "Привет! Я Моггвинчик - бот для рейта внешности\n\nСоздай анкету, чтобы тебя могли рейтить"
-    bot.send_message(user_id, welcome_text, reply_markup=start_keyboard())
+    bot.send_message(user_id, "Привет! Я Моггвинчик - бот для рейта внешности\n\nСоздай анкету, чтобы тебя могли рейтить", reply_markup=start_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Создать анкету")
 def create_profile(message):
@@ -58,39 +61,54 @@ def process_gender(message):
     database.db.update_gender(user_id, gender)
     bot.set_state(user_id, RegistrationStates.waiting_for_photos)
     
-    bot.send_message(user_id, "Отлично! Отправьте ваши реальные фото (1-3)")
+    bot.send_message(
+        user_id, 
+        "Отлично! Отправьте ваши реальные фото (1-3). Когда закончите, нажмите кнопку Готово",
+        reply_markup=photos_keyboard()
+    )
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, content_types=['photo', 'video'])
 def process_photos(message):
     user_id = message.from_user.id
     
-    with bot.retrieve_data(user_id) as data:
-        if 'photos' not in data:
-            data['photos'] = []
-        
-        if len(data['photos']) >= 3:
-            bot.send_message(user_id, "Нельзя отправлять более 3 фото")
-            return
-        
-        if message.content_type == 'photo':
-            data['photos'].append(message.photo[-1].file_id)
-        elif message.content_type == 'video':
-            data['photos'].append(message.video.file_id)
-        
-        count = len(data['photos'])
-        
-        if count >= 3:
-            finish_photos_upload(user_id)
+    try:
+        with bot.retrieve_data(user_id) as data:
+            if 'photos' not in data:
+                data['photos'] = []
+            
+            if len(data['photos']) >= 3:
+                bot.send_message(user_id, "Нельзя отправлять более 3 фото. Нажмите Готово для завершения.")
+                return
+            
+            if message.content_type == 'photo':
+                data['photos'].append(message.photo[-1].file_id)
+            elif message.content_type == 'video':
+                data['photos'].append(message.video.file_id)
+            
+            count = len(data['photos'])
+            bot.send_message(user_id, f"Фото получено ({count}/3). Отправьте ещё или нажмите Готово.")
+    except KeyError:
+        bot.send_message(user_id, "Произошла ошибка. Нажмите Создать анкету чтобы начать заново.", reply_markup=start_keyboard())
+        bot.delete_state(user_id)
+
+@bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
+def finish_photos_button(message):
+    finish_photos_upload(message.from_user.id)
 
 def finish_photos_upload(user_id):
-    with bot.retrieve_data(user_id) as data:
-        photos = data.get('photos', [])
-        
-        if not photos:
-            bot.send_message(user_id, "Вы не отправили фото, отправьте хотя бы одно")
-            return
-        
-        database.db.update_photos(user_id, photos)
+    try:
+        with bot.retrieve_data(user_id) as data:
+            photos = data.get('photos', [])
+            
+            if not photos:
+                bot.send_message(user_id, "Вы не отправили фото, отправьте хотя бы одно")
+                return
+            
+            database.db.update_photos(user_id, photos)
+    except KeyError:
+        bot.send_message(user_id, "Ошибка. Начните создание анкеты заново.", reply_markup=start_keyboard())
+        bot.delete_state(user_id)
+        return
     
     bot.delete_state(user_id)
     bot.send_message(user_id, "Отлично! Ваши фото загружены. Идём моггать!", reply_markup=main_menu_keyboard())
@@ -112,7 +130,7 @@ def show_profile(message):
             try:
                 bot.send_video(user_id, media)
             except:
-                bot.send_message(user_id, "Не удалось загрузить медиа")
+                pass
     
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
     bot.send_message(user_id, profile_text, reply_markup=my_profile_keyboard())
@@ -174,8 +192,11 @@ def show_user_for_rating(rater_id, target_user):
     bot.send_message(rater_id, profile_text)
     bot.send_message(rater_id, "Нажмите Назад чтобы выйти в главное меню", reply_markup=back_keyboard())
     
-    with bot.retrieve_data(rater_id) as data:
-        data['rating_target'] = user_data['user_id']
+    try:
+        with bot.retrieve_data(rater_id) as data:
+            data['rating_target'] = user_data['user_id']
+    except:
+        pass
 
 @bot.message_handler(func=lambda message: message.text in [
     "Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam",
@@ -185,8 +206,12 @@ def process_rating(message):
     rater_id = message.from_user.id
     rating = message.text
     
-    with bot.retrieve_data(rater_id) as data:
-        target_id = data.get('rating_target')
+    try:
+        with bot.retrieve_data(rater_id) as data:
+            target_id = data.get('rating_target')
+    except:
+        bot.send_message(rater_id, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
+        return
     
     if not target_id:
         bot.send_message(rater_id, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
@@ -229,8 +254,11 @@ def send_next_notification(user_id):
     
     message_text = f"{rater_name} {gender_text} вас на {rating}"
     
-    with bot.retrieve_data(user_id) as data:
-        data['current_notification'] = notification
+    try:
+        with bot.retrieve_data(user_id) as data:
+            data['current_notification'] = notification
+    except:
+        pass
     
     rater = database.db.get_user(notification['rater_id'])
     rater_data = get_user_data(rater)
@@ -254,11 +282,15 @@ def send_next_notification(user_id):
 def request_chat(call):
     user_id = call.from_user.id
     
-    with bot.retrieve_data(user_id) as data:
-        notification = data.get('current_notification')
+    try:
+        with bot.retrieve_data(user_id) as data:
+            notification = data.get('current_notification')
+    except:
+        bot.answer_callback_query(call.id, "Ошибка.")
+        return
     
     if not notification:
-        bot.answer_callback_query(call.id, "Ошибка. Уведомление не найдено.")
+        bot.answer_callback_query(call.id, "Ошибка.")
         return
     
     rater_id = notification['rater_id']
@@ -276,7 +308,6 @@ def request_chat(call):
                     pass
         
         contact_text = f"{user_data['first_name']} хочет пообщаться!"
-        
         if user_data['username']:
             contact_text += f" - @{user_data['username']}"
         else:
@@ -309,7 +340,35 @@ def skip_all(call):
     bot.send_message(user_id, "Все рейты пропущены", reply_markup=main_menu_keyboard())
     bot.answer_callback_query(call.id, "Пропущено")
 
+# Flask приложение
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+@app.route(f'/bot{TOKEN}', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'OK'
+    return 'Bad request'
+
+def set_webhook():
+    time.sleep(2)
+    bot.remove_webhook()
+    time.sleep(1)
+    bot.set_webhook(url='https://moggvinchikbot.onrender.com/bot' + TOKEN)
+
+def start_flask():
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+
 if __name__ == "__main__":
     print("Бот Моггвинчик запущен!")
     bot.add_custom_filter(custom_filters.StateFilter(bot))
-    bot.infinity_polling()
+    
+    threading.Thread(target=set_webhook).start()
+    start_flask()
