@@ -30,8 +30,14 @@ def get_user_data(user):
         'photos': json.loads(user[4]) if user[4] else [],
         'ratings': json.loads(user[5]) if user[5] else [],
         'avg_rating': user[6],
-        'is_active': user[7]
+        'is_active': user[7],
+        'display_name': user[8] if len(user) > 8 else None
     }
+
+def get_display_name(user_data):
+    if user_data['display_name']:
+        return user_data['display_name']
+    return user_data['first_name']
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -93,9 +99,8 @@ def process_photos(message):
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
 def finish_photos_button(message):
-    finish_photos_upload(message.from_user.id)
-
-def finish_photos_upload(user_id):
+    user_id = message.from_user.id
+    
     try:
         with bot.retrieve_data(user_id) as data:
             photos = data.get('photos', [])
@@ -104,7 +109,51 @@ def finish_photos_upload(user_id):
                 bot.send_message(user_id, "Вы не отправили фото, отправьте хотя бы одно")
                 return
             
+            # Сохраняем фото во временные данные
+            data['photos'] = photos
+    except KeyError:
+        bot.send_message(user_id, "Ошибка. Начните создание анкеты заново.", reply_markup=start_keyboard())
+        bot.delete_state(user_id)
+        return
+    
+    # Переходим к выбору ника
+    bot.set_state(user_id, RegistrationStates.waiting_for_name)
+    bot.send_message(
+        user_id, 
+        "Как вас зовут?",
+        reply_markup=name_keyboard()
+    )
+
+@bot.message_handler(state=RegistrationStates.waiting_for_name, func=lambda message: message.text == "Взять из Telegram")
+def take_name_from_telegram(message):
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name
+    
+    finish_registration(user_id, first_name)
+
+@bot.message_handler(state=RegistrationStates.waiting_for_name)
+def process_name(message):
+    user_id = message.from_user.id
+    name = message.text
+    
+    if name == "Готово":
+        # Если пустое имя, берём из Telegram
+        name = message.from_user.first_name
+    
+    finish_registration(user_id, name)
+
+def finish_registration(user_id, display_name):
+    try:
+        with bot.retrieve_data(user_id) as data:
+            photos = data.get('photos', [])
+            
+            if not photos:
+                bot.send_message(user_id, "Ошибка. Фото не найдены. Начните заново.", reply_markup=start_keyboard())
+                bot.delete_state(user_id)
+                return
+            
             database.db.update_photos(user_id, photos)
+            database.db.update_display_name(user_id, display_name)
     except KeyError:
         bot.send_message(user_id, "Ошибка. Начните создание анкеты заново.", reply_markup=start_keyboard())
         bot.delete_state(user_id)
@@ -123,7 +172,8 @@ def show_profile(message):
         bot.send_message(user_id, "У вас ещё нет анкеты. Создайте её!", reply_markup=start_keyboard())
         return
     
-    profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
+    display_name = get_display_name(user_data)
+    profile_text = f"{display_name}\nСредний рейт: {user_data['avg_rating']}"
     
     if len(user_data['photos']) == 1:
         media = user_data['photos'][0]
@@ -177,9 +227,10 @@ def delete_profile(message):
 @bot.message_handler(func=lambda message: message.text == "Рейтить")
 def start_rating(message):
     user_id = message.from_user.id
-    user_data = get_user_data(database.db.get_user(user_id))
+    user = database.db.get_user(user_id)
+    user_data = get_user_data(user)
     
-    if not user_data or not user_data['photos']:
+    if not user_data or not user_data['photos'] or len(user_data['photos']) == 0:
         bot.send_message(user_id, "Сначала создайте анкету!", reply_markup=start_keyboard())
         return
     
@@ -197,9 +248,10 @@ def show_user_for_rating(rater_id, target_user):
     if not user_data:
         return
     
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
+    display_name = get_display_name(user_data)
+    profile_text = f"{display_name}\nСредний рейт: {user_data['avg_rating']}"
     
-    profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
+    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
     
     if len(user_data['photos']) == 1:
         media = user_data['photos'][0]
@@ -228,8 +280,6 @@ def show_user_for_rating(rater_id, target_user):
             bot.send_media_group(rater_id, media_group)
         except:
             pass
-    
-    bot.send_message(rater_id, "Нажмите Назад чтобы выйти в главное меню", reply_markup=back_keyboard())
     
     try:
         with bot.retrieve_data(rater_id) as data:
@@ -303,7 +353,8 @@ def send_next_notification(user_id):
     rater_data = get_user_data(rater)
     
     if rater_data and rater_data['photos']:
-        rater_profile = f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}"
+        rater_display_name = get_display_name(rater_data)
+        rater_profile = f"{rater_display_name}\nСредний рейт: {rater_data['avg_rating']}"
         
         if len(rater_data['photos']) == 1:
             media = rater_data['photos'][0]
@@ -354,7 +405,8 @@ def request_chat(call):
     user_data = get_user_data(user)
     
     if user_data and user_data['photos']:
-        contact_text = f"{user_data['first_name']} хочет пообщаться!"
+        display_name = get_display_name(user_data)
+        contact_text = f"{display_name} хочет пообщаться!"
         if user_data['username']:
             contact_text += f" - @{user_data['username']}"
         else:
