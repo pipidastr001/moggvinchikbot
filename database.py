@@ -26,15 +26,23 @@ class Database:
         self.conn.commit()
     
     def create_user(self, user_id, username, first_name):
-        self.cursor.execute(
-            'INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)',
-            (user_id, username, first_name)
-        )
+        user = self.get_user(user_id)
+        if user:
+            # Пользователь есть, обновляем username если изменился
+            self.cursor.execute(
+                'UPDATE users SET username = ? WHERE user_id = ?',
+                (username, user_id)
+            )
+        else:
+            self.cursor.execute(
+                'INSERT INTO users (user_id, username, first_name) VALUES (?, ?, ?)',
+                (user_id, username, first_name)
+            )
         self.conn.commit()
     
     def update_gender(self, user_id, gender):
         self.cursor.execute(
-            'UPDATE users SET gender = ? WHERE user_id = ?',
+            'UPDATE users SET gender = ?, is_active = 1 WHERE user_id = ?',
             (gender, user_id)
         )
         self.conn.commit()
@@ -49,7 +57,7 @@ class Database:
     
     def update_name(self, user_id, name):
         self.cursor.execute(
-            'UPDATE users SET first_name = ? WHERE user_id = ?',
+            'UPDATE users SET first_name = ?, is_active = 1 WHERE user_id = ?',
             (name, user_id)
         )
         self.conn.commit()
@@ -82,15 +90,15 @@ class Database:
     def get_all_active_users(self, exclude_user_id=None):
         if exclude_user_id:
             self.cursor.execute(
-                'SELECT * FROM users WHERE is_active = 1 AND user_id != ? AND photos IS NOT NULL',
+                'SELECT * FROM users WHERE is_active = 1 AND photos IS NOT NULL AND photos != "" AND user_id != ?',
                 (exclude_user_id,)
             )
         else:
-            self.cursor.execute('SELECT * FROM users WHERE is_active = 1 AND photos IS NOT NULL')
+            self.cursor.execute('SELECT * FROM users WHERE is_active = 1 AND photos IS NOT NULL AND photos != ""')
         return self.cursor.fetchall()
     
     def delete_user(self, user_id):
-        self.cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
+        self.cursor.execute('UPDATE users SET is_active = 0, photos = NULL, ratings = NULL, avg_rating = "Нет оценок" WHERE user_id = ?', (user_id,))
         self.conn.commit()
 
 db = Database()
