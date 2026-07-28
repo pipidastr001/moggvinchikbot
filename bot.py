@@ -86,7 +86,7 @@ def process_gender(message):
     database.db.update_gender(user_id, gender)
     bot.set_state(user_id, RegistrationStates.waiting_for_photos)
     
-    bot.send_message(user_id, "Отлично! Отправьте ваши **реальные фото** (1-3)", parse_mode="Markdown")
+    bot.send_message(user_id, "Отлично! Отправьте ваши **реальные фото** (1-3)", parse_mode="Markdown", reply_markup=done_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, content_types=['photo', 'video'])
 def process_photos(message):
@@ -122,7 +122,7 @@ def finish_photos_upload(user_id):
         photos = data.get('photos', [])
         
         if not photos:
-            bot.send_message(user_id, "Вы не отправили фото, отправьте **хотя бы одно**", parse_mode="Markdown")
+            bot.send_message(user_id, "Вы не отправили фото, отправьте **хотя бы одно**", parse_mode="Markdown", reply_markup=done_keyboard())
             return
         
         database.db.update_photos(user_id, photos)
@@ -221,7 +221,7 @@ def show_user_for_rating(rater_id, target_user):
     profile_text = f"{user_data['first_name']}\nСредний рейт: **{user_data['avg_rating']}**"
     send_album(rater_id, user_data['photos'], profile_text)
     
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard_with_back(user_data['gender']))
+    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
     
     with bot.retrieve_data(rater_id) as data:
         data['rating_target'] = user_data['user_id']
