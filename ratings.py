@@ -15,15 +15,13 @@ class RatingQueue:
         if not self.users_pool or self.current_index >= len(self.users_pool):
             self.users_pool = get_all_users_for_rating(current_user_id)
             self.current_index = 0
-        
         if self.users_pool:
-            user = self.users_pool[self.current_index]
+            u = self.users_pool[self.current_index]
             self.current_index += 1
-            return user
+            return u
         return None
 
 def get_queue_for_user(user_id):
-    queue = RatingQueue()
-    queue.users_pool = get_all_users_for_rating(user_id)
-    queue.current_index = 0
-    return queue
+    q = RatingQueue()
+    q.users_pool = get_all_users_for_rating(user_id)
+    return q
