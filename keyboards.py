@@ -34,6 +34,21 @@ def rating_keyboard(gender):
     
     return keyboard
 
+def rating_keyboard_with_back(gender):
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    
+    if gender == "M":
+        ratings = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
+    else:
+        ratings = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
+    
+    for rating in ratings:
+        keyboard.add(types.KeyboardButton(rating))
+    
+    keyboard.add(types.KeyboardButton("Назад"))
+    
+    return keyboard
+
 def name_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton("Взять из Telegram"))
