@@ -21,7 +21,7 @@ def my_profile_keyboard():
     keyboard.add(types.KeyboardButton("Изменить анкету"), types.KeyboardButton("Удалить анкету"))
     return keyboard
 
-def rating_keyboard_with_back(gender):
+def rating_keyboard(gender):
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     
     if gender == "M":
