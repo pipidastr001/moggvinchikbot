@@ -1,11 +1,5 @@
 from telebot import types
 
-# Чётко: только мужские оценки
-MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
-
-# Чётко: только женские оценки
-FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
-
 def start_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton("Создать анкету"))
@@ -38,17 +32,12 @@ def my_profile_keyboard():
     return keyboard
 
 def rating_keyboard(gender):
-    """Возвращает клавиатуру ТОЛЬКО с оценками для указанного пола"""
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     
-    # Жёсткая проверка пола
     if gender == "M" or gender == "М":
-        ratings = MALE_RATINGS
-    elif gender == "Ж":
-        ratings = FEMALE_RATINGS
+        ratings = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
     else:
-        # На всякий случай — мужские по умолчанию
-        ratings = MALE_RATINGS
+        ratings = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
     
     for rating in ratings:
         keyboard.add(types.KeyboardButton(rating))
@@ -58,13 +47,7 @@ def rating_keyboard(gender):
 
 def notification_keyboard():
     keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(
-        types.InlineKeyboardButton("Запросить общение", callback_data="request_chat")
-    )
-    keyboard.add(
-        types.InlineKeyboardButton("Дальше", callback_data="next_rating")
-    )
-    keyboard.add(
-        types.InlineKeyboardButton("Пропустить всех", callback_data="skip_all")
-    )
+    keyboard.add(types.InlineKeyboardButton("Запросить общение", callback_data="request_chat"))
+    keyboard.add(types.InlineKeyboardButton("Дальше", callback_data="next_rating"))
+    keyboard.add(types.InlineKeyboardButton("Пропустить всех", callback_data="skip_all"))
     return keyboard
