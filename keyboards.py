@@ -34,11 +34,6 @@ def rating_keyboard(gender):
     
     return keyboard
 
-def back_keyboard():
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(types.KeyboardButton("Назад"))
-    return keyboard
-
 def name_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton("Взять из Telegram"))
