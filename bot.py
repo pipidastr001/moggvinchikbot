@@ -164,8 +164,7 @@ def show_user_for_rating(rater_id, target_user):
     if not user_data:
         return
     
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
-    
+    # СНАЧАЛА ОТПРАВЛЯЕМ ФОТО
     for media in user_data['photos']:
         try:
             bot.send_photo(rater_id, media)
@@ -175,8 +174,14 @@ def show_user_for_rating(rater_id, target_user):
             except:
                 pass
     
+    # ПОТОМ ИНФУ
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
     bot.send_message(rater_id, profile_text)
+    
+    # ПОТОМ КНОПКИ ОЦЕНОК
+    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
+    
+    # КНОПКА НАЗАД ВНИЗУ
     bot.send_message(rater_id, "Нажмите Назад чтобы выйти в главное меню", reply_markup=back_keyboard())
     
     with bot.retrieve_data(rater_id) as data:
