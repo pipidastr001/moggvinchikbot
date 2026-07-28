@@ -1,5 +1,11 @@
 from telebot import types
 
+# Чётко: только мужские оценки
+MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
+
+# Чётко: только женские оценки
+FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
+
 def start_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton("Создать анкету"))
@@ -32,12 +38,17 @@ def my_profile_keyboard():
     return keyboard
 
 def rating_keyboard(gender):
+    """Возвращает клавиатуру ТОЛЬКО с оценками для указанного пола"""
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     
-    if gender == "M":
-        ratings = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
+    # Жёсткая проверка пола
+    if gender == "M" or gender == "М":
+        ratings = MALE_RATINGS
+    elif gender == "Ж":
+        ratings = FEMALE_RATINGS
     else:
-        ratings = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
+        # На всякий случай — мужские по умолчанию
+        ratings = MALE_RATINGS
     
     for rating in ratings:
         keyboard.add(types.KeyboardButton(rating))
