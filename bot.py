@@ -79,6 +79,12 @@ def process_photos(message):
         
         if count >= 3:
             finish_photos_upload(user_id)
+        else:
+            bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или напишите Готово")
+
+@bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
+def finish_photos_text(message):
+    finish_photos_upload(message.from_user.id)
 
 def finish_photos_upload(user_id):
     with bot.retrieve_data(user_id) as data:
@@ -90,8 +96,39 @@ def finish_photos_upload(user_id):
         
         database.db.update_photos(user_id, photos)
     
+    bot.set_state(user_id, RegistrationStates.waiting_for_name)
+    
+    user = database.db.get_user(user_id)
+    user_data = get_user_data(user)
+    tg_name = user_data['first_name'] if user_data else "Пользователь"
+    
+    bot.send_message(
+        user_id,
+        f"Как вас отображать в анкете?\n\nВаше имя в Telegram: {tg_name}",
+        reply_markup=name_keyboard()
+    )
+
+@bot.message_handler(state=RegistrationStates.waiting_for_name, func=lambda message: message.text == "Взять из Telegram")
+def use_telegram_name(message):
+    user_id = message.from_user.id
+    database.db.update_name(user_id, message.from_user.first_name)
+    
     bot.delete_state(user_id)
-    bot.send_message(user_id, "Отлично! Ваши фото загружены. Идём моггать!", reply_markup=main_menu_keyboard())
+    bot.send_message(user_id, "Отлично! Ваша анкета создана. Идём моггать!", reply_markup=main_menu_keyboard())
+
+@bot.message_handler(state=RegistrationStates.waiting_for_name)
+def set_custom_name(message):
+    user_id = message.from_user.id
+    custom_name = message.text.strip()
+    
+    if len(custom_name) > 50:
+        bot.send_message(user_id, "Имя слишком длинное. Напишите до 50 символов.")
+        return
+    
+    database.db.update_name(user_id, custom_name)
+    
+    bot.delete_state(user_id)
+    bot.send_message(user_id, "Отлично! Ваша анкета создана. Идём моггать!", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Моя анкета")
 def show_profile(message):
@@ -157,6 +194,7 @@ def show_user_for_rating(rater_id, target_user):
     if not user_data:
         return
     
+    # Сначала фото
     for media in user_data['photos']:
         try:
             bot.send_photo(rater_id, media)
@@ -166,10 +204,14 @@ def show_user_for_rating(rater_id, target_user):
             except:
                 pass
     
+    # Имя и рейт
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
     bot.send_message(rater_id, profile_text)
     
+    # Кнопки оценок
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
+    
+    # Кнопка Назад
     bot.send_message(rater_id, "Нажмите Назад чтобы выйти в главное меню", reply_markup=back_keyboard())
     
     with bot.retrieve_data(rater_id) as data:
