@@ -14,6 +14,9 @@ state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
 last_rating_time = {}
 
+# ЖЕЛЕЗНОЕ ХРАНИЛИЩЕ ЦЕЛИ РЕЙТА (не зависит от состояний)
+rating_targets = {}
+
 def get_user_data(u):
     if not u: return None
     return {
@@ -45,15 +48,14 @@ def send_album(chat_id, photos, caption):
     return False
 
 def get_gender_ratings(gender):
-    """ЖЕЛЕЗНАЯ проверка пола"""
-    if gender == "M" or gender == "М":
+    if gender == "M":
         return ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
     else:
         return ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
 
 MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
 FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
-ALL_RATINGS = list(set(MALE_RATINGS + FEMALE_RATINGS))
+ALL_RATINGS = MALE_RATINGS + FEMALE_RATINGS
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -75,7 +77,6 @@ def process_gender(message):
     if g not in ["М", "Ж"]:
         bot.send_message(uid, "Пожалуйста, выберите пол используя кнопки М или Ж")
         return
-    # Сохраняем пол как M или Ж (одна буква)
     gender_code = "M" if g == "М" else "Ж"
     database.db.update_gender(uid, gender_code)
     bot.set_state(uid, RegistrationStates.waiting_for_photos)
@@ -177,9 +178,7 @@ def show_profile(message):
 @bot.message_handler(func=lambda m: m.text == "Назад")
 def go_back(message):
     uid = message.from_user.id
-    # Сбрасываем рекламный режим
-    with bot.retrieve_data(uid) as d:
-        d['ad_mode'] = False
+    rating_targets.pop(uid, None)
     bot.send_message(uid, "Главное меню", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "Изменить анкету")
@@ -199,11 +198,8 @@ def start_rating(message):
         bot.send_message(uid, "**Сначала создайте анкету!**", reply_markup=start_keyboard(), parse_mode="Markdown")
         return
     
-    # 5% шанс на рекламу
     if random.random() < 0.05:
         bot.send_message(uid, "Заходите в ТГК - @moggvinchiktgk", reply_markup=ad_keyboard())
-        with bot.retrieve_data(uid) as d:
-            d['ad_mode'] = True
         return
     
     show_next_rating(uid)
@@ -219,21 +215,15 @@ def show_next_rating(uid):
 @bot.message_handler(func=lambda m: m.text == "Дальше")
 def ad_next(message):
     uid = message.from_user.id
-    with bot.retrieve_data(uid) as d:
-        if d.get('ad_mode'):
-            d['ad_mode'] = False
-            show_next_rating(uid)
-            return
+    show_next_rating(uid)
 
 def show_user_for_rating(rater_id, target):
     ud = get_user_data(target)
     if not ud: return
+    # СОХРАНЯЕМ ЦЕЛЬ В ГЛОБАЛЬНУЮ ПЕРЕМЕННУЮ
+    rating_targets[rater_id] = ud['user_id']
     send_album(rater_id, ud['photos'], build_profile_text(ud))
-    # ЖЕЛЕЗНАЯ проверка пола перед показом кнопок
-    ratings = get_gender_ratings(ud['gender'])
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
-    with bot.retrieve_data(rater_id) as d:
-        d['rating_target'] = ud['user_id']
 
 @bot.message_handler(func=lambda m: m.text in ALL_RATINGS)
 def process_rating(message):
@@ -245,18 +235,18 @@ def process_rating(message):
         return
     last_rating_time[rater_id] = now
     
-    with bot.retrieve_data(rater_id) as d:
-        target_id = d.get('rating_target')
+    # БЕРЁМ ЦЕЛЬ ИЗ ГЛОБАЛЬНОЙ ПЕРЕМЕННОЙ
+    target_id = rating_targets.get(rater_id)
     
     if not target_id:
-        bot.send_message(rater_id, "**Ошибка.** Начните рейт заново", reply_markup=main_menu_keyboard(), parse_mode="Markdown")
+        bot.send_message(rater_id, "Цель не найдена. Начните рейт заново", reply_markup=main_menu_keyboard())
         return
     
     database.db.add_rating(target_id, rating)
     rater_ud = get_user_data(database.db.get_user(rater_id))
     
     if not rater_ud:
-        bot.send_message(rater_id, "**Ошибка.** Ваша анкета не найдена", reply_markup=main_menu_keyboard(), parse_mode="Markdown")
+        bot.send_message(rater_id, "Ваша анкета не найдена", reply_markup=main_menu_keyboard())
         return
     
     gender_text = "Оценила" if rater_ud['gender'] == 'Ж' else "Оценил"
@@ -276,11 +266,8 @@ def process_rating(message):
             except:
                 pass
     
-    # 5% шанс на рекламу
     if random.random() < 0.05:
         bot.send_message(rater_id, "Заходите в ТГК - @moggvinchiktgk", reply_markup=ad_keyboard())
-        with bot.retrieve_data(rater_id) as d:
-            d['ad_mode'] = True
         return
     
     show_next_rating(rater_id)
