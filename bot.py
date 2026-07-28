@@ -99,6 +99,41 @@ def finish_photos_upload(user_id):
         
         database.db.update_photos(user_id, photos)
     
+    # Переходим к выбору ника
+    bot.set_state(user_id, RegistrationStates.waiting_for_name)
+    
+    user = database.db.get_user(user_id)
+    user_data = get_user_data(user)
+    tg_name = user_data['first_name'] if user_data else "Пользователь"
+    
+    bot.send_message(
+        user_id,
+        f"Как вас отображать в анкете?\n\nВаше имя в Telegram: {tg_name}",
+        reply_markup=name_keyboard()
+    )
+
+@bot.message_handler(state=RegistrationStates.waiting_for_name, func=lambda message: message.text == "Взять из Telegram")
+def use_telegram_name(message):
+    user_id = message.from_user.id
+    user = database.db.get_user(user_id)
+    
+    # Обновляем имя в базе на имя из Telegram
+    database.db.update_name(user_id, message.from_user.first_name)
+    
+    bot.delete_state(user_id)
+    bot.send_message(user_id, "Отлично! Ваши фото загружены. Идём моггать!", reply_markup=main_menu_keyboard())
+
+@bot.message_handler(state=RegistrationStates.waiting_for_name)
+def set_custom_name(message):
+    user_id = message.from_user.id
+    custom_name = message.text.strip()
+    
+    if len(custom_name) > 50:
+        bot.send_message(user_id, "Имя слишком длинное. Напишите до 50 символов.")
+        return
+    
+    database.db.update_name(user_id, custom_name)
+    
     bot.delete_state(user_id)
     bot.send_message(user_id, "Отлично! Ваши фото загружены. Идём моггать!", reply_markup=main_menu_keyboard())
 
