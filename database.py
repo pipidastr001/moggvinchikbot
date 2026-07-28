@@ -20,15 +20,9 @@ class Database:
                 photos TEXT,
                 ratings TEXT,
                 avg_rating TEXT DEFAULT 'Нет оценок',
-                is_active INTEGER DEFAULT 1,
-                display_name TEXT
+                is_active INTEGER DEFAULT 1
             )
         ''')
-        # Добавляем колонку display_name если её нет (для старых баз)
-        try:
-            self.cursor.execute('ALTER TABLE users ADD COLUMN display_name TEXT')
-        except:
-            pass
         self.conn.commit()
     
     def create_user(self, user_id, username, first_name):
@@ -53,13 +47,6 @@ class Database:
         )
         self.conn.commit()
     
-    def update_display_name(self, user_id, display_name):
-        self.cursor.execute(
-            'UPDATE users SET display_name = ? WHERE user_id = ?',
-            (display_name, user_id)
-        )
-        self.conn.commit()
-    
     def add_rating(self, user_id, rating):
         user = self.get_user(user_id)
         if user:
@@ -67,33 +54,22 @@ class Database:
             ratings.append(rating)
             ratings_json = json.dumps(ratings)
             
-            avg_rating = self.calculate_avg_rating(ratings, user[3])
+            # Считаем самую частую оценку
+            if ratings:
+                most_common = Counter(ratings).most_common(1)[0][0]
+                avg_rating = most_common
+            else:
+                avg_rating = "Нет оценок"
             
             self.cursor.execute(
                 'UPDATE users SET ratings = ?, avg_rating = ? WHERE user_id = ?',
                 (ratings_json, avg_rating, user_id)
             )
             self.conn.commit()
-    
-    def calculate_avg_rating(self, ratings, gender):
-        if not ratings:
-            return "Нет оценок"
-        
-        most_common = Counter(ratings).most_common(1)[0][0]
-        
-        male_ratings = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
-        female_ratings = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
-        
-        if gender == 'M':
-            if most_common in female_ratings:
-                idx = female_ratings.index(most_common)
-                return male_ratings[idx]
-        elif gender == 'Ж':
-            if most_common in male_ratings:
-                idx = male_ratings.index(most_common)
-                return female_ratings[idx]
-        
-        return most_common
+            print(f"DEBUG: Added rating {rating} for user {user_id}. Total ratings: {ratings}, Avg: {avg_rating}")
+            return True
+        print(f"DEBUG: User {user_id} not found in database")
+        return False
     
     def get_user(self, user_id):
         self.cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
@@ -102,11 +78,11 @@ class Database:
     def get_all_active_users(self, exclude_user_id=None):
         if exclude_user_id:
             self.cursor.execute(
-                'SELECT * FROM users WHERE is_active = 1 AND user_id != ?',
+                'SELECT * FROM users WHERE is_active = 1 AND user_id != ? AND photos IS NOT NULL',
                 (exclude_user_id,)
             )
         else:
-            self.cursor.execute('SELECT * FROM users WHERE is_active = 1')
+            self.cursor.execute('SELECT * FROM users WHERE is_active = 1 AND photos IS NOT NULL')
         return self.cursor.fetchall()
     
     def delete_user(self, user_id):
