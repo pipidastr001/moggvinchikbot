@@ -179,7 +179,6 @@ def show_profile(message):
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back(message):
     user_id = message.from_user.id
-    bot.delete_state(user_id)
     bot.send_message(user_id, "Главное меню", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Изменить анкету")
