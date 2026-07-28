@@ -35,7 +35,7 @@ def get_user_data(user):
     }
 
 def get_display_name(user_data):
-    if user_data['display_name']:
+    if user_data.get('display_name'):
         return user_data['display_name']
     return user_data['first_name']
 
@@ -93,7 +93,7 @@ def process_photos(message):
             
             count = len(data['photos'])
             bot.send_message(user_id, f"Фото получено ({count}/3). Отправьте ещё или нажмите Готово.")
-    except KeyError:
+    except:
         bot.send_message(user_id, "Произошла ошибка. Нажмите Создать анкету чтобы начать заново.", reply_markup=start_keyboard())
         bot.delete_state(user_id)
 
@@ -109,14 +109,12 @@ def finish_photos_button(message):
                 bot.send_message(user_id, "Вы не отправили фото, отправьте хотя бы одно")
                 return
             
-            # Сохраняем фото во временные данные
             data['photos'] = photos
-    except KeyError:
+    except:
         bot.send_message(user_id, "Ошибка. Начните создание анкеты заново.", reply_markup=start_keyboard())
         bot.delete_state(user_id)
         return
     
-    # Переходим к выбору ника
     bot.set_state(user_id, RegistrationStates.waiting_for_name)
     bot.send_message(
         user_id, 
@@ -128,16 +126,14 @@ def finish_photos_button(message):
 def take_name_from_telegram(message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name
-    
     finish_registration(user_id, first_name)
 
 @bot.message_handler(state=RegistrationStates.waiting_for_name)
 def process_name(message):
     user_id = message.from_user.id
-    name = message.text
+    name = message.text.strip()
     
-    if name == "Готово":
-        # Если пустое имя, берём из Telegram
+    if not name:
         name = message.from_user.first_name
     
     finish_registration(user_id, name)
@@ -154,7 +150,7 @@ def finish_registration(user_id, display_name):
             
             database.db.update_photos(user_id, photos)
             database.db.update_display_name(user_id, display_name)
-    except KeyError:
+    except:
         bot.send_message(user_id, "Ошибка. Начните создание анкеты заново.", reply_markup=start_keyboard())
         bot.delete_state(user_id)
         return
@@ -168,7 +164,7 @@ def show_profile(message):
     user = database.db.get_user(user_id)
     user_data = get_user_data(user)
     
-    if not user_data or not user_data['photos']:
+    if not user_data or not user_data['photos'] or len(user_data['photos']) == 0:
         bot.send_message(user_id, "У вас ещё нет анкеты. Создайте её!", reply_markup=start_keyboard())
         return
     
@@ -188,12 +184,12 @@ def show_profile(message):
         media_group = []
         for i, media in enumerate(user_data['photos']):
             if i == 0:
-                if media.startswith('video'):
+                if str(media).startswith('video') or str(media).startswith('BAAC'):
                     media_group.append(telebot.types.InputMediaVideo(media, caption=profile_text))
                 else:
                     media_group.append(telebot.types.InputMediaPhoto(media, caption=profile_text))
             else:
-                if media.startswith('video'):
+                if str(media).startswith('video') or str(media).startswith('BAAC'):
                     media_group.append(telebot.types.InputMediaVideo(media))
                 else:
                     media_group.append(telebot.types.InputMediaPhoto(media))
@@ -208,6 +204,7 @@ def show_profile(message):
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back(message):
     user_id = message.from_user.id
+    bot.delete_state(user_id)
     bot.send_message(user_id, "Главное меню", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Изменить анкету")
@@ -251,7 +248,10 @@ def show_user_for_rating(rater_id, target_user):
     display_name = get_display_name(user_data)
     profile_text = f"{display_name}\nСредний рейт: {user_data['avg_rating']}"
     
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
+    # Важно! Берем пол целевого пользователя для кнопок
+    target_gender = user_data['gender']
+    
+    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(target_gender))
     
     if len(user_data['photos']) == 1:
         media = user_data['photos'][0]
@@ -266,12 +266,12 @@ def show_user_for_rating(rater_id, target_user):
         media_group = []
         for i, media in enumerate(user_data['photos']):
             if i == 0:
-                if media.startswith('video'):
+                if str(media).startswith('video') or str(media).startswith('BAAC'):
                     media_group.append(telebot.types.InputMediaVideo(media, caption=profile_text))
                 else:
                     media_group.append(telebot.types.InputMediaPhoto(media, caption=profile_text))
             else:
-                if media.startswith('video'):
+                if str(media).startswith('video') or str(media).startswith('BAAC'):
                     media_group.append(telebot.types.InputMediaVideo(media))
                 else:
                     media_group.append(telebot.types.InputMediaPhoto(media))
@@ -306,23 +306,32 @@ def process_rating(message):
         bot.send_message(rater_id, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
         return
     
+    # Добавляем оценку
     database.db.add_rating(target_id, rating)
     
+    # Получаем данные оценщика
     rater = database.db.get_user(rater_id)
     rater_data = get_user_data(rater)
     
+    if not rater_data:
+        bot.send_message(rater_id, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
+        return
+    
+    # Сохраняем уведомление
     if target_id not in rating_notifications:
         rating_notifications[target_id] = deque()
     
     rating_notifications[target_id].appendleft({
         'rater_id': rater_id,
         'rating': rating,
-        'rater_gender': rater_data['gender'],
-        'rater_first_name': rater_data['first_name']
+        'rater_gender': rater_data.get('gender', 'М'),
+        'rater_first_name': get_display_name(rater_data)
     })
     
+    # Отправляем уведомление
     send_next_notification(target_id)
     
+    # Показываем следующую анкету
     queue = get_queue_for_user(rater_id)
     next_user = queue.get_next_user(rater_id)
     
@@ -352,7 +361,7 @@ def send_next_notification(user_id):
     rater = database.db.get_user(notification['rater_id'])
     rater_data = get_user_data(rater)
     
-    if rater_data and rater_data['photos']:
+    if rater_data and rater_data.get('photos'):
         rater_display_name = get_display_name(rater_data)
         rater_profile = f"{rater_display_name}\nСредний рейт: {rater_data['avg_rating']}"
         
@@ -369,12 +378,12 @@ def send_next_notification(user_id):
             media_group = []
             for i, media in enumerate(rater_data['photos']):
                 if i == 0:
-                    if media.startswith('video'):
+                    if str(media).startswith('video') or str(media).startswith('BAAC'):
                         media_group.append(telebot.types.InputMediaVideo(media, caption=rater_profile))
                     else:
                         media_group.append(telebot.types.InputMediaPhoto(media, caption=rater_profile))
                 else:
-                    if media.startswith('video'):
+                    if str(media).startswith('video') or str(media).startswith('BAAC'):
                         media_group.append(telebot.types.InputMediaVideo(media))
                     else:
                         media_group.append(telebot.types.InputMediaPhoto(media))
@@ -404,10 +413,10 @@ def request_chat(call):
     user = database.db.get_user(user_id)
     user_data = get_user_data(user)
     
-    if user_data and user_data['photos']:
+    if user_data and user_data.get('photos'):
         display_name = get_display_name(user_data)
         contact_text = f"{display_name} хочет пообщаться!"
-        if user_data['username']:
+        if user_data.get('username'):
             contact_text += f" - @{user_data['username']}"
         else:
             contact_text += " -"
@@ -425,12 +434,12 @@ def request_chat(call):
             media_group = []
             for i, media in enumerate(user_data['photos']):
                 if i == 0:
-                    if media.startswith('video'):
+                    if str(media).startswith('video') or str(media).startswith('BAAC'):
                         media_group.append(telebot.types.InputMediaVideo(media, caption=contact_text))
                     else:
                         media_group.append(telebot.types.InputMediaPhoto(media, caption=contact_text))
                 else:
-                    if media.startswith('video'):
+                    if str(media).startswith('video') or str(media).startswith('BAAC'):
                         media_group.append(telebot.types.InputMediaVideo(media))
                     else:
                         media_group.append(telebot.types.InputMediaPhoto(media))
