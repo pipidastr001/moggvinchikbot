@@ -1,327 +1,116 @@
-import telebot
-from telebot import custom_filters
-from telebot.storage import StateMemoryStorage
+import sqlite3
 import json
-import database
-from keyboards import *
-from states import RegistrationStates
-from ratings import get_queue_for_user
-import time
-import random
+from collections import Counter
 import os
-from threading import Thread
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
-TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
-state_storage = StateMemoryStorage()
-bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
-last_rating_time = {}
-
-# ЖЕЛЕЗНОЕ ХРАНИЛИЩЕ ЦЕЛИ РЕЙТА
-rating_targets = {}
-
-def get_user_data(u):
-    if not u: return None
-    return {
-        'user_id': u[0], 'username': u[1], 'first_name': u[2], 'gender': u[3],
-        'photos': json.loads(u[4]) if u[4] else [],
-        'description': u[5] if len(u) > 5 else '',
-        'ratings': json.loads(u[6]) if len(u) > 6 and u[6] else [],
-        'avg_rating': u[7] if len(u) > 7 else 'Нет оценок',
-        'is_active': u[8] if len(u) > 8 else 1
-    }
-
-def send_album(chat_id, photos, caption):
-    if not photos: return False
-    media = []
-    for i, p in enumerate(photos):
-        try:
-            media.append(telebot.types.InputMediaPhoto(p, caption=caption, parse_mode="Markdown") if i == 0 else telebot.types.InputMediaPhoto(p))
-        except:
-            try:
-                media.append(telebot.types.InputMediaVideo(p, caption=caption, parse_mode="Markdown") if i == 0 else telebot.types.InputMediaVideo(p))
-            except:
-                pass
-    if media:
-        try:
-            bot.send_media_group(chat_id, media)
-            return True
-        except:
-            pass
-    return False
-
-def get_gender_ratings(gender):
-    if gender == "M":
-        return ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
-    else:
-        return ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
-
-MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
-FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
-ALL_RATINGS = MALE_RATINGS + FEMALE_RATINGS
-
-@bot.message_handler(commands=['start'])
-def start(message):
-    uid = message.from_user.id
-    database.db.create_user(uid, message.from_user.username, message.from_user.first_name)
-    txt = "Привет! Я **Моггвинчик** - бот для рейта внешности\n\nСоздай **анкету**, чтобы тебя могли рейтить\n\nТГК - @moggvinchiktgk"
-    bot.send_message(uid, txt, reply_markup=start_keyboard(), parse_mode="Markdown")
-
-@bot.message_handler(func=lambda m: m.text == "Создать анкету")
-def create_profile(message):
-    uid = message.from_user.id
-    bot.set_state(uid, RegistrationStates.waiting_for_gender)
-    bot.send_message(uid, "Выберите ваш пол", reply_markup=gender_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_gender)
-def process_gender(message):
-    uid = message.from_user.id
-    g = message.text
-    if g not in ["М", "Ж"]:
-        bot.send_message(uid, "Пожалуйста, выберите пол используя кнопки М или Ж")
-        return
-    gender_code = "M" if g == "М" else "Ж"
-    database.db.update_gender(uid, gender_code)
-    bot.set_state(uid, RegistrationStates.waiting_for_photos)
-    bot.send_message(uid, "Отлично! Отправьте ваши **реальные фото** (1-3)", parse_mode="Markdown", reply_markup=done_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_photos, content_types=['photo', 'video'])
-def process_photos(message):
-    uid = message.from_user.id
-    with bot.retrieve_data(uid) as d:
-        d.setdefault('photos', [])
-        if len(d['photos']) >= 3:
-            bot.send_message(uid, "Нельзя отправлять более 3 фото")
-            finish_photos_upload(uid)
-            return
-        d['photos'].append(message.photo[-1].file_id if message.content_type == 'photo' else message.video.file_id)
-        if len(d['photos']) >= 3:
-            finish_photos_upload(uid)
+class Database:
+    def __init__(self):
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mogvinchik.db')
+        self.db_path = db_path
+        self.create_tables()
+    
+    def get_conn(self):
+        return sqlite3.connect(self.db_path, check_same_thread=False)
+    
+    def create_tables(self):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                gender TEXT,
+                photos TEXT,
+                description TEXT DEFAULT '',
+                ratings TEXT,
+                avg_rating TEXT DEFAULT 'Нет оценок',
+                is_active INTEGER DEFAULT 1
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    
+    def create_user(self, user_id, username, first_name):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+        user = c.fetchone()
+        if user:
+            c.execute('UPDATE users SET username = ? WHERE user_id = ?', (username, user_id))
         else:
-            bot.send_message(uid, f"Фото {len(d['photos'])}/3 загружено. Отправьте ещё или напишите Готово", reply_markup=done_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda m: m.text == "Готово")
-def finish_photos_text(message):
-    finish_photos_upload(message.from_user.id)
-
-def finish_photos_upload(uid):
-    with bot.retrieve_data(uid) as d:
-        photos = d.get('photos', [])
-        if not photos:
-            bot.send_message(uid, "Вы не отправили фото, отправьте **хотя бы одно**", parse_mode="Markdown", reply_markup=done_keyboard())
-            return
-        database.db.update_photos(uid, photos)
-    bot.set_state(uid, RegistrationStates.waiting_for_name)
-    u = database.db.get_user(uid)
-    ud = get_user_data(u)
-    bot.send_message(uid, f"Как вас отображать в анкете?\n\nВаше имя в Telegram: {ud['first_name']}", reply_markup=name_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_name, func=lambda m: m.text == "Взять из Telegram")
-def use_tg_name(message):
-    uid = message.from_user.id
-    database.db.update_name(uid, message.from_user.first_name)
-    bot.set_state(uid, RegistrationStates.waiting_for_description)
-    bot.send_message(uid, "Добавьте описание (рост, вес, интересы — что угодно) или нажмите Пропустить", reply_markup=desc_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_name)
-def set_custom_name(message):
-    uid = message.from_user.id
-    name = message.text.strip()
-    if len(name) > 50:
-        bot.send_message(uid, "Имя слишком длинное. Напишите до 50 символов")
-        return
-    database.db.update_name(uid, name)
-    bot.set_state(uid, RegistrationStates.waiting_for_description)
-    bot.send_message(uid, "Добавьте описание (рост, вес, интересы — что угодно) или нажмите Пропустить", reply_markup=desc_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_description, func=lambda m: m.text == "Пропустить")
-def skip_description(message):
-    uid = message.from_user.id
-    database.db.update_description(uid, "")
-    bot.delete_state(uid)
-    bot.send_message(uid, "Отлично! Ваша анкета создана. Идём моггать!", reply_markup=main_menu_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_description, func=lambda m: m.text == "Готово")
-def done_description(message):
-    uid = message.from_user.id
-    with bot.retrieve_data(uid) as d:
-        desc = d.get('desc', '')
-    database.db.update_description(uid, desc)
-    bot.delete_state(uid)
-    bot.send_message(uid, "Отлично! Ваша анкета создана. Идём моггать!", reply_markup=main_menu_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_description)
-def set_description(message):
-    uid = message.from_user.id
-    desc = message.text.strip()
-    if len(desc) > 200:
-        bot.send_message(uid, "Описание слишком длинное. Напишите до 200 символов")
-        return
-    with bot.retrieve_data(uid) as d:
-        d['desc'] = desc
-    bot.send_message(uid, "Описание сохранено. Нажмите Готово чтобы завершить, или Пропустить чтобы не добавлять", reply_markup=desc_keyboard())
-
-def build_profile_text(ud):
-    gender_display = "М" if ud['gender'] == "M" else "Ж"
-    txt = f"{ud['first_name']}\nПол: **{gender_display}**\nСредний рейт: **{ud['avg_rating']}**"
-    if ud.get('description'):
-        txt += f"\n{ud['description']}"
-    return txt
-
-@bot.message_handler(func=lambda m: m.text == "Моя анкета")
-def show_profile(message):
-    uid = message.from_user.id
-    ud = get_user_data(database.db.get_user(uid))
-    if not ud or not ud['photos']:
-        bot.send_message(uid, "У вас ещё нет анкеты. **Создайте её!**", reply_markup=start_keyboard(), parse_mode="Markdown")
-        return
-    send_album(uid, ud['photos'], build_profile_text(ud))
-    bot.send_message(uid, "Ваша анкета", reply_markup=my_profile_keyboard())
-
-@bot.message_handler(func=lambda m: m.text == "Назад")
-def go_back(message):
-    uid = message.from_user.id
-    rating_targets.pop(uid, None)
-    bot.send_message(uid, "Главное меню", reply_markup=main_menu_keyboard())
-
-@bot.message_handler(func=lambda m: m.text == "Изменить анкету")
-def edit_profile(message):
-    create_profile(message)
-
-@bot.message_handler(func=lambda m: m.text == "Удалить анкету")
-def delete_profile(message):
-    database.db.delete_user(message.from_user.id)
-    bot.send_message(message.from_user.id, "Анкета удалена. Для создания новой нажмите кнопку ниже", reply_markup=start_keyboard())
-
-@bot.message_handler(func=lambda m: m.text == "Рейтить")
-def start_rating(message):
-    uid = message.from_user.id
-    ud = get_user_data(database.db.get_user(uid))
-    if not ud or not ud['photos']:
-        bot.send_message(uid, "**Сначала создайте анкету!**", reply_markup=start_keyboard(), parse_mode="Markdown")
-        return
+            c.execute('INSERT INTO users (user_id, username, first_name) VALUES (?, ?, ?)', (user_id, username, first_name))
+        conn.commit()
+        conn.close()
     
-    if random.random() < 0.05:
-        bot.send_message(uid, "Заходите в ТГК - @moggvinchiktgk", reply_markup=ad_keyboard())
-        return
+    def update_gender(self, user_id, gender):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('UPDATE users SET gender = ? WHERE user_id = ?', (gender, user_id))
+        conn.commit()
+        conn.close()
     
-    show_next_rating(uid)
-
-def show_next_rating(uid):
-    q = get_queue_for_user(uid)
-    nxt = q.get_next_user(uid)
-    if nxt:
-        show_user_for_rating(uid, nxt)
-    else:
-        bot.send_message(uid, "Пока нет доступных анкет для рейта. Попробуйте позже", reply_markup=main_menu_keyboard())
-
-@bot.message_handler(func=lambda m: m.text == "Дальше")
-def ad_next(message):
-    uid = message.from_user.id
-    show_next_rating(uid)
-
-def show_user_for_rating(rater_id, target):
-    ud = get_user_data(target)
-    if not ud: return
-    rating_targets[rater_id] = ud['user_id']
-    send_album(rater_id, ud['photos'], build_profile_text(ud))
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
-
-@bot.message_handler(func=lambda m: m.text in ALL_RATINGS)
-def process_rating(message):
-    rater_id = message.from_user.id
-    rating = message.text
+    def update_photos(self, user_id, photos):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('UPDATE users SET photos = ?, is_active = 1 WHERE user_id = ?', (json.dumps(photos), user_id))
+        conn.commit()
+        conn.close()
     
-    now = time.time()
-    if rater_id in last_rating_time and now - last_rating_time[rater_id] < 1:
-        return
-    last_rating_time[rater_id] = now
+    def update_name(self, user_id, name):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('UPDATE users SET first_name = ? WHERE user_id = ?', (name, user_id))
+        conn.commit()
+        conn.close()
     
-    target_id = rating_targets.get(rater_id)
+    def update_description(self, user_id, description):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('UPDATE users SET description = ? WHERE user_id = ?', (description, user_id))
+        conn.commit()
+        conn.close()
     
-    if not target_id:
-        bot.send_message(rater_id, "Цель не найдена. Начните рейт заново", reply_markup=main_menu_keyboard())
-        return
+    def add_rating(self, user_id, rating):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+        user = c.fetchone()
+        if not user:
+            conn.close()
+            return False
+        ratings = json.loads(user[6]) if user[6] else []
+        ratings.append(rating)
+        avg = Counter(ratings).most_common(1)[0][0] if ratings else "Нет оценок"
+        c.execute('UPDATE users SET ratings = ?, avg_rating = ? WHERE user_id = ?', (json.dumps(ratings), avg, user_id))
+        conn.commit()
+        conn.close()
+        return True
     
-    database.db.add_rating(target_id, rating)
-    rater_ud = get_user_data(database.db.get_user(rater_id))
+    def get_user(self, user_id):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+        user = c.fetchone()
+        conn.close()
+        return user
     
-    if not rater_ud:
-        bot.send_message(rater_id, "Ваша анкета не найдена", reply_markup=main_menu_keyboard())
-        return
-    
-    gender_text = "Оценила" if rater_ud['gender'] == 'Ж' else "Оценил"
-    
-    if rater_ud['photos']:
-        rp = f"{rater_ud['first_name']}\nПол: **{'М' if rater_ud['gender'] == 'M' else 'Ж'}**\nСредний рейт: **{rater_ud['avg_rating']}**\n\n{rater_ud['first_name']} {gender_text} вас на **{rating}**"
-        with bot.retrieve_data(target_id) as td:
-            td['current_notification'] = {'rater_id': rater_id, 'rating': rating, 'rater_gender': rater_ud['gender'], 'rater_first_name': rater_ud['first_name']}
-        if not send_album(target_id, rater_ud['photos'], rp):
-            try:
-                bot.send_message(target_id, f"{rater_ud['first_name']} {gender_text} вас на **{rating}**", reply_markup=notification_keyboard(), parse_mode="Markdown")
-            except:
-                pass
+    def get_all_active_users(self, exclude_user_id=None):
+        conn = self.get_conn()
+        c = conn.cursor()
+        if exclude_user_id:
+            c.execute("SELECT * FROM users WHERE is_active = 1 AND photos IS NOT NULL AND photos != '' AND user_id != ?", (exclude_user_id,))
         else:
-            try:
-                bot.send_message(target_id, "Что дальше?", reply_markup=notification_keyboard())
-            except:
-                pass
+            c.execute("SELECT * FROM users WHERE is_active = 1 AND photos IS NOT NULL AND photos != ''")
+        users = c.fetchall()
+        conn.close()
+        return users
     
-    if random.random() < 0.05:
-        bot.send_message(rater_id, "Заходите в ТГК - @moggvinchiktgk", reply_markup=ad_keyboard())
-        return
-    
-    show_next_rating(rater_id)
+    def delete_user(self, user_id):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('UPDATE users SET is_active = 0, photos = NULL, ratings = NULL, avg_rating = "Нет оценок", gender = NULL, description = "" WHERE user_id = ?', (user_id,))
+        conn.commit()
+        conn.close()
 
-@bot.callback_query_handler(func=lambda c: c.data == "request_chat")
-def request_chat(call):
-    uid = call.from_user.id
-    with bot.retrieve_data(uid) as d:
-        notif = d.get('current_notification')
-    if not notif:
-        bot.answer_callback_query(call.id, "Ошибка"); return
-    ud = get_user_data(database.db.get_user(uid))
-    if ud and ud['photos']:
-        txt = f"{ud['first_name']} хочет пообщаться!"
-        txt += f" - @{ud['username']}" if ud['username'] else " -"
-        send_album(notif['rater_id'], ud['photos'], txt)
-    bot.answer_callback_query(call.id, "Запрос отправлен!")
-    bot.send_message(uid, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
-
-@bot.callback_query_handler(func=lambda c: c.data == "next_rating")
-def next_rating(call):
-    bot.answer_callback_query(call.id, "Дальше")
-    bot.send_message(call.from_user.id, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
-
-@bot.callback_query_handler(func=lambda c: c.data == "skip_all")
-def skip_all(call):
-    bot.send_message(call.from_user.id, "Все рейты пропущены", reply_markup=main_menu_keyboard())
-    bot.answer_callback_query(call.id, "Пропущено")
-
-# ============================================
-# ВЕБ-СЕРВЕР ДЛЯ RENDER (чтобы не падал)
-# ============================================
-
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is running")
-
-def run_web_server():
-    port = int(os.environ.get('PORT', 10000))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
-
-if __name__ == "__main__":
-    print("🚀 Бот Моггвинчик запущен!")
-    
-    # Запускаем веб-сервер в отдельном потоке
-    web_thread = Thread(target=run_web_server, daemon=True)
-    web_thread.start()
-    print(f"✅ Веб-сервер запущен на порту {os.environ.get('PORT', 10000)}")
-    
-    # Запускаем бота
-    bot.add_custom_filter(custom_filters.StateFilter(bot))
-    bot.remove_webhook()
-    bot.infinity_polling()
+db = Database()
