@@ -263,30 +263,26 @@ def process_rating(message):
     
     show_next_rating(rater_id)
 
-@bot.callback_query_handler(func=lambda c: c.data == "request_chat")
-def request_chat(call):
-    uid = call.from_user.id
+@bot.message_handler(func=lambda m: m.text == "Запросить общение")
+def request_chat_button(message):
+    uid = message.from_user.id
     with bot.retrieve_data(uid) as d:
         notif = d.get('current_notification')
     if not notif:
-        bot.answer_callback_query(call.id, "Ошибка"); return
+        bot.send_message(uid, "Ошибка")
+        return
     ud = get_user_data(database.db.get_user(uid))
     if ud and ud['photos']:
         txt = f"{ud['first_name']} хочет пообщаться!"
         txt += f" - @{ud['username']}" if ud['username'] else " -"
         send_album(notif['rater_id'], ud['photos'], txt)
-    bot.answer_callback_query(call.id, "Запрос отправлен!")
+    bot.send_message(uid, "Запрос отправлен!")
     bot.send_message(uid, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
 
-@bot.callback_query_handler(func=lambda c: c.data == "next_rating")
-def next_rating(call):
-    bot.answer_callback_query(call.id, "Дальше")
-    bot.send_message(call.from_user.id, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
-
-@bot.callback_query_handler(func=lambda c: c.data == "skip_all")
-def skip_all(call):
-    bot.send_message(call.from_user.id, "Все рейты пропущены", reply_markup=main_menu_keyboard())
-    bot.answer_callback_query(call.id, "Пропущено")
+@bot.message_handler(func=lambda m: m.text == "Пропустить всех")
+def skip_all_button(message):
+    uid = message.from_user.id
+    bot.send_message(uid, "Все рейты пропущены", reply_markup=main_menu_keyboard())
 
 if __name__ == "__main__":
     print("Бот Моггвинчик запущен!")
