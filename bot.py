@@ -37,7 +37,6 @@ def start(message):
     
     database.db.create_user(user_id, username, first_name)
     
-    # Проверяем неотправленные уведомления
     if user_id in rating_notifications and rating_notifications[user_id]:
         send_next_notification(user_id)
     else:
@@ -62,7 +61,7 @@ def process_gender(message):
     database.db.update_gender(user_id, gender)
     bot.set_state(user_id, RegistrationStates.waiting_for_photos)
     
-    bot.send_message(user_id, "Отлично! Отправьте ваши реальные фото (1-3)")
+    bot.send_message(user_id, "Отлично! Отправьте ваши реальные фото (1-3)\n\nКогда закончите, нажмите кнопку Готово", reply_markup=done_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, content_types=['photo', 'video'])
 def process_photos(message):
@@ -73,7 +72,7 @@ def process_photos(message):
             data['photos'] = []
         
         if len(data['photos']) >= 3:
-            bot.send_message(user_id, "Нельзя отправлять более 3 фото")
+            bot.send_message(user_id, "Нельзя отправлять более 3 фото. Нажмите Готово чтобы завершить.")
             return
         
         if message.content_type == 'photo':
@@ -82,9 +81,11 @@ def process_photos(message):
             data['photos'].append(message.video.file_id)
         
         count = len(data['photos'])
-        
-        if count >= 3:
-            finish_photos_upload(user_id)
+        bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или нажмите Готово")
+
+@bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
+def finish_photos_button(message):
+    finish_photos_upload(message.from_user.id)
 
 def finish_photos_upload(user_id):
     with bot.retrieve_data(user_id) as data:
@@ -196,15 +197,11 @@ def process_rating(message):
         bot.send_message(rater_id, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
         return
     
-    # Сохраняем оценку в БД
-    result = database.db.add_rating(target_id, rating)
-    print(f"DEBUG: Rating result: {result}")
+    database.db.add_rating(target_id, rating)
     
-    # Получаем данные оценщика
     rater = database.db.get_user(rater_id)
     rater_data = get_user_data(rater)
     
-    # Добавляем уведомление в очередь
     if target_id not in rating_notifications:
         rating_notifications[target_id] = deque()
     
@@ -215,13 +212,11 @@ def process_rating(message):
         'rater_first_name': rater_data['first_name'] if rater_data else 'Пользователь'
     })
     
-    # Пробуем отправить уведомление
     try:
         send_next_notification(target_id)
     except Exception as e:
-        print(f"DEBUG: Notification error: {e}")
+        print(f"Notification error: {e}")
     
-    # Показываем следующую анкету
     queue = get_queue_for_user(rater_id)
     next_user = queue.get_next_user(rater_id)
     
@@ -245,7 +240,6 @@ def send_next_notification(user_id):
     with bot.retrieve_data(user_id) as data:
         data['current_notification'] = notification
     
-    # Показываем анкету того кто оценил
     rater = database.db.get_user(notification['rater_id'])
     rater_data = get_user_data(rater)
     
@@ -265,7 +259,7 @@ def send_next_notification(user_id):
     try:
         bot.send_message(user_id, message_text, reply_markup=notification_keyboard())
     except Exception as e:
-        print(f"DEBUG: Failed to send notification to {user_id}: {e}")
+        print(f"Failed to send notification to {user_id}: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == "request_chat")
 def request_chat(call):
