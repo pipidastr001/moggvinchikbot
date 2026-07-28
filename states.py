@@ -4,3 +4,4 @@ class RegistrationStates(StatesGroup):
     waiting_for_gender = State()
     waiting_for_photos = State()
     waiting_for_name = State()
+    waiting_for_description = State()
