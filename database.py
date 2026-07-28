@@ -28,7 +28,6 @@ class Database:
     def create_user(self, user_id, username, first_name):
         user = self.get_user(user_id)
         if user:
-            # Пользователь есть, обновляем username если изменился
             self.cursor.execute(
                 'UPDATE users SET username = ? WHERE user_id = ?',
                 (username, user_id)
