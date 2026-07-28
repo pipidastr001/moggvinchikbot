@@ -122,7 +122,7 @@ def set_custom_name(message):
     custom_name = message.text.strip()
     
     if len(custom_name) > 50:
-        bot.send_message(user_id, "Имя слишком длинное. Напишите до 50 символов.")
+        bot.send_message(user_id, "Имя слишком длинное. Напишите до 50 символов")
         return
     
     database.db.update_name(user_id, custom_name)
@@ -252,7 +252,7 @@ def show_user_for_rating(rater_id, target_user):
                     except:
                         pass
     
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
+    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard_with_back(user_data['gender']))
     
     with bot.retrieve_data(rater_id) as data:
         data['rating_target'] = user_data['user_id']
