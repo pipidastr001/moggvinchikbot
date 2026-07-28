@@ -41,7 +41,7 @@ class Database:
     
     def update_gender(self, user_id, gender):
         self.cursor.execute(
-            'UPDATE users SET gender = ?, is_active = 1 WHERE user_id = ?',
+            'UPDATE users SET gender = ? WHERE user_id = ?',
             (gender, user_id)
         )
         self.conn.commit()
@@ -56,7 +56,7 @@ class Database:
     
     def update_name(self, user_id, name):
         self.cursor.execute(
-            'UPDATE users SET first_name = ?, is_active = 1 WHERE user_id = ?',
+            'UPDATE users SET first_name = ? WHERE user_id = ?',
             (name, user_id)
         )
         self.conn.commit()
@@ -97,7 +97,10 @@ class Database:
         return self.cursor.fetchall()
     
     def delete_user(self, user_id):
-        self.cursor.execute('UPDATE users SET is_active = 0, photos = NULL, ratings = NULL, avg_rating = "Нет оценок" WHERE user_id = ?', (user_id,))
+        self.cursor.execute(
+            'UPDATE users SET is_active = 0, photos = NULL, ratings = NULL, avg_rating = "Нет оценок", gender = NULL WHERE user_id = ?',
+            (user_id,)
+        )
         self.conn.commit()
 
 db = Database()
