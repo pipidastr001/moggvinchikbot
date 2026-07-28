@@ -8,13 +8,16 @@ from states import RegistrationStates
 from ratings import get_queue_for_user
 import time
 import random
+import os
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
 last_rating_time = {}
 
-# ЖЕЛЕЗНОЕ ХРАНИЛИЩЕ ЦЕЛИ РЕЙТА (не зависит от состояний)
+# ЖЕЛЕЗНОЕ ХРАНИЛИЩЕ ЦЕЛИ РЕЙТА
 rating_targets = {}
 
 def get_user_data(u):
@@ -220,7 +223,6 @@ def ad_next(message):
 def show_user_for_rating(rater_id, target):
     ud = get_user_data(target)
     if not ud: return
-    # СОХРАНЯЕМ ЦЕЛЬ В ГЛОБАЛЬНУЮ ПЕРЕМЕННУЮ
     rating_targets[rater_id] = ud['user_id']
     send_album(rater_id, ud['photos'], build_profile_text(ud))
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
@@ -235,7 +237,6 @@ def process_rating(message):
         return
     last_rating_time[rater_id] = now
     
-    # БЕРЁМ ЦЕЛЬ ИЗ ГЛОБАЛЬНОЙ ПЕРЕМЕННОЙ
     target_id = rating_targets.get(rater_id)
     
     if not target_id:
@@ -297,8 +298,30 @@ def skip_all(call):
     bot.send_message(call.from_user.id, "Все рейты пропущены", reply_markup=main_menu_keyboard())
     bot.answer_callback_query(call.id, "Пропущено")
 
+# ============================================
+# ВЕБ-СЕРВЕР ДЛЯ RENDER (чтобы не падал)
+# ============================================
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+def run_web_server():
+    port = int(os.environ.get('PORT', 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
+
 if __name__ == "__main__":
-    print("Бот Моггвинчик запущен!")
+    print("🚀 Бот Моггвинчик запущен!")
+    
+    # Запускаем веб-сервер в отдельном потоке
+    web_thread = Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+    print(f"✅ Веб-сервер запущен на порту {os.environ.get('PORT', 10000)}")
+    
+    # Запускаем бота
     bot.add_custom_filter(custom_filters.StateFilter(bot))
     bot.remove_webhook()
     bot.infinity_polling()
