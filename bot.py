@@ -83,10 +83,10 @@ def process_photos(message):
         if count >= 3:
             finish_photos_upload(user_id)
         else:
-            bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или нажмите любую кнопку для завершения")
+            bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или напишите Готово")
 
-@bot.message_handler(state=RegistrationStates.waiting_for_photos)
-def finish_photos_any(message):
+@bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
+def finish_photos_text(message):
     finish_photos_upload(message.from_user.id)
 
 def finish_photos_upload(user_id):
@@ -152,7 +152,6 @@ def start_rating(message):
         bot.send_message(user_id, "Сначала создайте анкету!", reply_markup=start_keyboard())
         return
     
-    # Сначала проверяем неотправленные уведомления
     if user_id in rating_notifications and rating_notifications[user_id]:
         send_next_notification(user_id)
         return
@@ -209,7 +208,6 @@ def process_rating(message):
     rater = database.db.get_user(rater_id)
     rater_data = get_user_data(rater)
     
-    # СОХРАНЯЕМ УВЕДОМЛЕНИЕ В ОЧЕРЕДЬ
     if target_id not in rating_notifications:
         rating_notifications[target_id] = deque()
     
@@ -220,7 +218,6 @@ def process_rating(message):
         'rater_first_name': rater_data['first_name'] if rater_data else 'Пользователь'
     })
     
-    # ПЫТАЕМСЯ ОТПРАВИТЬ УВЕДОМЛЕНИЕ СРАЗУ
     try:
         send_next_notification(target_id)
     except:
