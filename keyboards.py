@@ -53,8 +53,7 @@ def ad_keyboard():
     return k
 
 def notification_keyboard():
-    k = types.InlineKeyboardMarkup()
-    k.add(types.InlineKeyboardButton("Запросить общение", callback_data="request_chat"))
-    k.add(types.InlineKeyboardButton("Дальше", callback_data="next_rating"))
-    k.add(types.InlineKeyboardButton("Пропустить всех", callback_data="skip_all"))
+    k = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    k.add(types.KeyboardButton("Запросить общение"))
+    k.add(types.KeyboardButton("Дальше"), types.KeyboardButton("Пропустить всех"))
     return k
