@@ -14,11 +14,14 @@ import os
 
 TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
 
+# Чёткое разделение оценок по полу
+MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
+FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
+
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage, threaded=False)
 
 rating_notifications = {}
-# Храним rating_target в оперативной памяти (не через state_storage)
 rating_targets = {}
 
 def get_user_data(user):
@@ -40,6 +43,14 @@ def get_display_name(user_data):
     if user_data.get('display_name'):
         return user_data['display_name']
     return user_data['first_name']
+
+def is_valid_rating_for_gender(rating, gender):
+    """Проверяет, подходит ли оценка для указанного пола"""
+    if gender == 'M':
+        return rating in MALE_RATINGS
+    elif gender == 'Ж':
+        return rating in FEMALE_RATINGS
+    return False
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -69,7 +80,6 @@ def process_gender(message):
     database.db.update_gender(user_id, gender)
     bot.set_state(user_id, RegistrationStates.waiting_for_photos)
     
-    # Инициализируем фото
     with bot.retrieve_data(user_id) as data:
         data['photos'] = []
     
@@ -100,7 +110,7 @@ def process_photos(message):
             count = len(data['photos'])
             bot.send_message(user_id, f"Фото получено ({count}/3). Отправьте ещё или нажмите Готово.")
     except:
-        bot.send_message(user_id, "Произошла ошибка. Нажмите Создать анкету чтобы начать заново.", reply_markup=start_keyboard())
+        bot.send_message(user_id, "Ошибка. Нажмите Создать анкету заново.", reply_markup=start_keyboard())
         bot.delete_state(user_id)
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
@@ -110,7 +120,6 @@ def finish_photos_button(message):
     try:
         with bot.retrieve_data(user_id) as data:
             photos = data.get('photos', [])
-            
             if not photos:
                 bot.send_message(user_id, "Вы не отправили фото, отправьте хотя бы одно")
                 return
@@ -120,42 +129,31 @@ def finish_photos_button(message):
         return
     
     bot.set_state(user_id, RegistrationStates.waiting_for_name)
-    bot.send_message(
-        user_id, 
-        "Как вас зовут?",
-        reply_markup=name_keyboard()
-    )
+    bot.send_message(user_id, "Как вас зовут?", reply_markup=name_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_name, func=lambda message: message.text == "Взять из Telegram")
 def take_name_from_telegram(message):
-    user_id = message.from_user.id
-    first_name = message.from_user.first_name
-    finish_registration(user_id, first_name)
+    finish_registration(message.from_user.id, message.from_user.first_name)
 
 @bot.message_handler(state=RegistrationStates.waiting_for_name)
 def process_name(message):
-    user_id = message.from_user.id
     name = message.text.strip()
-    
     if not name:
         name = message.from_user.first_name
-    
-    finish_registration(user_id, name)
+    finish_registration(message.from_user.id, name)
 
 def finish_registration(user_id, display_name):
     try:
         with bot.retrieve_data(user_id) as data:
             photos = data.get('photos', [])
-            
             if not photos:
-                bot.send_message(user_id, "Ошибка. Фото не найдены. Начните заново.", reply_markup=start_keyboard())
+                bot.send_message(user_id, "Ошибка. Начните заново.", reply_markup=start_keyboard())
                 bot.delete_state(user_id)
                 return
-            
             database.db.update_photos(user_id, photos)
             database.db.update_display_name(user_id, display_name)
     except:
-        bot.send_message(user_id, "Ошибка. Начните создание анкеты заново.", reply_markup=start_keyboard())
+        bot.send_message(user_id, "Ошибка. Начните заново.", reply_markup=start_keyboard())
         bot.delete_state(user_id)
         return
     
@@ -165,10 +163,9 @@ def finish_registration(user_id, display_name):
 @bot.message_handler(func=lambda message: message.text == "Моя анкета")
 def show_profile(message):
     user_id = message.from_user.id
-    user = database.db.get_user(user_id)
-    user_data = get_user_data(user)
+    user_data = get_user_data(database.db.get_user(user_id))
     
-    if not user_data or not user_data['photos'] or len(user_data['photos']) == 0:
+    if not user_data or not user_data['photos']:
         bot.send_message(user_id, "У вас ещё нет анкеты. Создайте её!", reply_markup=start_keyboard())
         return
     
@@ -179,6 +176,8 @@ def show_profile(message):
     bot.send_message(user_id, "Выберите действие:", reply_markup=my_profile_keyboard())
 
 def send_media_with_caption(chat_id, photos, caption):
+    if not photos:
+        return
     if len(photos) == 1:
         media = photos[0]
         try:
@@ -231,10 +230,9 @@ def delete_profile(message):
 @bot.message_handler(func=lambda message: message.text == "Рейтить")
 def start_rating(message):
     user_id = message.from_user.id
-    user = database.db.get_user(user_id)
-    user_data = get_user_data(user)
+    user_data = get_user_data(database.db.get_user(user_id))
     
-    if not user_data or not user_data['photos'] or len(user_data['photos']) == 0:
+    if not user_data or not user_data['photos']:
         bot.send_message(user_id, "Сначала создайте анкету!", reply_markup=start_keyboard())
         return
     
@@ -252,30 +250,44 @@ def show_user_for_rating(rater_id, target_user):
     if not user_data:
         return
     
-    # Сохраняем target_id в оперативной памяти
-    rating_targets[rater_id] = user_data['user_id']
+    target_id = user_data['user_id']
+    target_gender = user_data['gender']
+    
+    # Жёстко сохраняем пол цели
+    rating_targets[rater_id] = {
+        'user_id': target_id,
+        'gender': target_gender
+    }
     
     display_name = get_display_name(user_data)
     profile_text = f"{display_name}\nСредний рейт: {user_data['avg_rating']}"
     
-    target_gender = user_data['gender']
-    
+    # Отправляем кнопки ТОЛЬКО для пола цели
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(target_gender))
     send_media_with_caption(rater_id, user_data['photos'], profile_text)
 
-@bot.message_handler(func=lambda message: message.text in [
-    "Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam",
-    "LTB", "MTB", "HTB", "Stacy", "True Eve"
-])
+# Принимаем ВСЕ возможные оценки (и М и Ж), но проверяем внутри
+ALL_POSSIBLE_RATINGS = MALE_RATINGS + FEMALE_RATINGS
+
+@bot.message_handler(func=lambda message: message.text in ALL_POSSIBLE_RATINGS)
 def process_rating(message):
     rater_id = message.from_user.id
     rating = message.text
     
-    # Берём target_id из памяти
-    target_id = rating_targets.get(rater_id)
+    # Получаем сохранённые данные о цели
+    target_info = rating_targets.get(rater_id)
     
-    if not target_id:
+    if not target_info:
         bot.send_message(rater_id, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
+        return
+    
+    target_id = target_info['user_id']
+    target_gender = target_info['gender']
+    
+    # ЖЕЛЕЗНАЯ ПРОВЕРКА: оценка должна соответствовать полу цели
+    if not is_valid_rating_for_gender(rating, target_gender):
+        bot.send_message(rater_id, f"Ошибка! Эта оценка не подходит для пола цели. Используйте кнопки на экране.", reply_markup=main_menu_keyboard())
+        rating_targets.pop(rater_id, None)
         return
     
     # Очищаем
@@ -284,15 +296,13 @@ def process_rating(message):
     # Добавляем оценку
     database.db.add_rating(target_id, rating)
     
-    # Получаем данные оценщика
-    rater = database.db.get_user(rater_id)
-    rater_data = get_user_data(rater)
+    # Данные оценщика
+    rater_data = get_user_data(database.db.get_user(rater_id))
     
     if not rater_data:
-        bot.send_message(rater_id, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
         return
     
-    # Сохраняем уведомление
+    # Уведомление
     if target_id not in rating_notifications:
         rating_notifications[target_id] = deque()
     
@@ -303,10 +313,9 @@ def process_rating(message):
         'rater_first_name': get_display_name(rater_data)
     })
     
-    # Отправляем уведомление
     send_next_notification(target_id)
     
-    # Показываем следующую анкету
+    # Следующая анкета
     queue = get_queue_for_user(rater_id)
     next_user = queue.get_next_user(rater_id)
     
@@ -322,20 +331,16 @@ def send_next_notification(user_id):
     notification = rating_notifications[user_id].popleft()
     
     gender_text = "Оценила" if notification['rater_gender'] == 'Ж' else "Оценил"
-    rating = notification['rating']
-    rater_name = notification['rater_first_name']
+    message_text = f"{notification['rater_first_name']} {gender_text} вас на {notification['rating']}"
     
-    message_text = f"{rater_name} {gender_text} вас на {rating}"
-    
-    # Сохраняем текущее уведомление
+    # Сохраняем для кнопок
     rating_targets[user_id] = notification
     
-    rater = database.db.get_user(notification['rater_id'])
-    rater_data = get_user_data(rater)
+    rater_data = get_user_data(database.db.get_user(notification['rater_id']))
     
     if rater_data and rater_data.get('photos'):
-        rater_display_name = get_display_name(rater_data)
-        rater_profile = f"{rater_display_name}\nСредний рейт: {rater_data['avg_rating']}"
+        rater_name = get_display_name(rater_data)
+        rater_profile = f"{rater_name}\nСредний рейт: {rater_data['avg_rating']}"
         send_media_with_caption(user_id, rater_data['photos'], rater_profile)
     
     bot.send_message(user_id, message_text, reply_markup=notification_keyboard())
@@ -343,16 +348,14 @@ def send_next_notification(user_id):
 @bot.callback_query_handler(func=lambda call: call.data == "request_chat")
 def request_chat(call):
     user_id = call.from_user.id
-    
     notification = rating_targets.get(user_id)
     
-    if not notification or not isinstance(notification, dict):
+    if not notification or not isinstance(notification, dict) or 'rater_id' not in notification:
         bot.answer_callback_query(call.id, "Ошибка.")
         return
     
     rater_id = notification['rater_id']
-    user = database.db.get_user(user_id)
-    user_data = get_user_data(user)
+    user_data = get_user_data(database.db.get_user(user_id))
     
     if user_data and user_data.get('photos'):
         display_name = get_display_name(user_data)
@@ -392,6 +395,7 @@ def skip_all(call):
     bot.send_message(user_id, "Все рейты пропущены", reply_markup=main_menu_keyboard())
     bot.answer_callback_query(call.id, "Пропущено")
 
+# Flask
 app = Flask(__name__)
 
 @app.route('/')
@@ -420,6 +424,5 @@ def start_flask():
 if __name__ == "__main__":
     print("Бот Моггвинчик запущен!")
     bot.add_custom_filter(custom_filters.StateFilter(bot))
-    
     threading.Thread(target=set_webhook).start()
     start_flask()
