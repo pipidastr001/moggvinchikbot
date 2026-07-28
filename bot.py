@@ -194,7 +194,6 @@ def show_user_for_rating(rater_id, target_user):
     if not user_data:
         return
     
-    # Сначала фото
     for media in user_data['photos']:
         try:
             bot.send_photo(rater_id, media)
@@ -204,15 +203,8 @@ def show_user_for_rating(rater_id, target_user):
             except:
                 pass
     
-    # Имя и рейт
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
-    bot.send_message(rater_id, profile_text)
-    
-    # Кнопки оценок
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
-    
-    # Кнопка Назад
-    bot.send_message(rater_id, "Нажмите Назад чтобы выйти в главное меню", reply_markup=back_keyboard())
+    bot.send_message(rater_id, profile_text, reply_markup=rating_keyboard(user_data['gender']))
     
     with bot.retrieve_data(rater_id) as data:
         data['rating_target'] = user_data['user_id']
@@ -237,7 +229,6 @@ def process_rating(message):
     rater = database.db.get_user(rater_id)
     rater_data = get_user_data(rater)
     
-    # Отправляем уведомление
     gender_text = "Оценила" if rater_data['gender'] == 'Ж' else "Оценил"
     message_text = f"{rater_data['first_name']} {gender_text} вас на {rating}"
     
@@ -249,7 +240,6 @@ def process_rating(message):
             'rater_first_name': rater_data['first_name']
         }
     
-    # Показываем анкету оценщика
     if rater_data['photos']:
         for media in rater_data['photos']:
             try:
