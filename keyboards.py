@@ -15,6 +15,11 @@ def photos_keyboard():
     keyboard.add(types.KeyboardButton("Готово"))
     return keyboard
 
+def name_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(types.KeyboardButton("Взять из Telegram"))
+    return keyboard
+
 def main_menu_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton("Рейтить"), types.KeyboardButton("Моя анкета"))
@@ -37,10 +42,6 @@ def rating_keyboard(gender):
     for rating in ratings:
         keyboard.add(types.KeyboardButton(rating))
     
-    return keyboard
-
-def back_keyboard():
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(types.KeyboardButton("Назад"))
     return keyboard
 
