@@ -2,6 +2,10 @@ import telebot
 from telebot import custom_filters
 from telebot.storage import StateMemoryStorage
 import json
+import os
+
+os.environ["PORT"] = "10000"
+
 import database
 from keyboards import *
 from states import RegistrationStates
