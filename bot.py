@@ -44,6 +44,17 @@ def send_album(chat_id, photos, caption):
             pass
     return False
 
+def get_gender_ratings(gender):
+    """ЖЕЛЕЗНАЯ проверка пола"""
+    if gender == "M" or gender == "М":
+        return ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
+    else:
+        return ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
+
+MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
+FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
+ALL_RATINGS = list(set(MALE_RATINGS + FEMALE_RATINGS))
+
 @bot.message_handler(commands=['start'])
 def start(message):
     uid = message.from_user.id
@@ -64,7 +75,9 @@ def process_gender(message):
     if g not in ["М", "Ж"]:
         bot.send_message(uid, "Пожалуйста, выберите пол используя кнопки М или Ж")
         return
-    database.db.update_gender(uid, g)
+    # Сохраняем пол как M или Ж (одна буква)
+    gender_code = "M" if g == "М" else "Ж"
+    database.db.update_gender(uid, gender_code)
     bot.set_state(uid, RegistrationStates.waiting_for_photos)
     bot.send_message(uid, "Отлично! Отправьте ваши **реальные фото** (1-3)", parse_mode="Markdown", reply_markup=done_keyboard())
 
@@ -145,7 +158,8 @@ def set_description(message):
     bot.send_message(uid, "Описание сохранено. Нажмите Готово чтобы завершить, или Пропустить чтобы не добавлять", reply_markup=desc_keyboard())
 
 def build_profile_text(ud):
-    txt = f"{ud['first_name']}\nПол: **{ud['gender']}**\nСредний рейт: **{ud['avg_rating']}**"
+    gender_display = "М" if ud['gender'] == "M" else "Ж"
+    txt = f"{ud['first_name']}\nПол: **{gender_display}**\nСредний рейт: **{ud['avg_rating']}**"
     if ud.get('description'):
         txt += f"\n{ud['description']}"
     return txt
@@ -162,7 +176,11 @@ def show_profile(message):
 
 @bot.message_handler(func=lambda m: m.text == "Назад")
 def go_back(message):
-    bot.send_message(message.from_user.id, "Главное меню", reply_markup=main_menu_keyboard())
+    uid = message.from_user.id
+    # Сбрасываем рекламный режим
+    with bot.retrieve_data(uid) as d:
+        d['ad_mode'] = False
+    bot.send_message(uid, "Главное меню", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "Изменить анкету")
 def edit_profile(message):
@@ -181,8 +199,8 @@ def start_rating(message):
         bot.send_message(uid, "**Сначала создайте анкету!**", reply_markup=start_keyboard(), parse_mode="Markdown")
         return
     
-    # 30% шанс показать рекламу ТГК
-    if random.random() < 0.3:
+    # 5% шанс на рекламу
+    if random.random() < 0.05:
         bot.send_message(uid, "Заходите в ТГК - @moggvinchiktgk", reply_markup=ad_keyboard())
         with bot.retrieve_data(uid) as d:
             d['ad_mode'] = True
@@ -206,24 +224,22 @@ def ad_next(message):
             d['ad_mode'] = False
             show_next_rating(uid)
             return
-    # Если не в рекламном режиме, игнорируем
 
 def show_user_for_rating(rater_id, target):
     ud = get_user_data(target)
     if not ud: return
     send_album(rater_id, ud['photos'], build_profile_text(ud))
+    # ЖЕЛЕЗНАЯ проверка пола перед показом кнопок
+    ratings = get_gender_ratings(ud['gender'])
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
     with bot.retrieve_data(rater_id) as d:
         d['rating_target'] = ud['user_id']
-
-MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
-FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
-ALL_RATINGS = MALE_RATINGS + FEMALE_RATINGS
 
 @bot.message_handler(func=lambda m: m.text in ALL_RATINGS)
 def process_rating(message):
     rater_id = message.from_user.id
     rating = message.text
+    
     now = time.time()
     if rater_id in last_rating_time and now - last_rating_time[rater_id] < 1:
         return
@@ -231,25 +247,37 @@ def process_rating(message):
     
     with bot.retrieve_data(rater_id) as d:
         target_id = d.get('rating_target')
+    
     if not target_id:
         bot.send_message(rater_id, "**Ошибка.** Начните рейт заново", reply_markup=main_menu_keyboard(), parse_mode="Markdown")
         return
     
     database.db.add_rating(target_id, rating)
     rater_ud = get_user_data(database.db.get_user(rater_id))
+    
+    if not rater_ud:
+        bot.send_message(rater_id, "**Ошибка.** Ваша анкета не найдена", reply_markup=main_menu_keyboard(), parse_mode="Markdown")
+        return
+    
     gender_text = "Оценила" if rater_ud['gender'] == 'Ж' else "Оценил"
     
     if rater_ud['photos']:
-        rp = f"{rater_ud['first_name']}\nПол: **{rater_ud['gender']}**\nСредний рейт: **{rater_ud['avg_rating']}**\n\n{rater_ud['first_name']} {gender_text} вас на **{rating}**"
+        rp = f"{rater_ud['first_name']}\nПол: **{'М' if rater_ud['gender'] == 'M' else 'Ж'}**\nСредний рейт: **{rater_ud['avg_rating']}**\n\n{rater_ud['first_name']} {gender_text} вас на **{rating}**"
         with bot.retrieve_data(target_id) as td:
             td['current_notification'] = {'rater_id': rater_id, 'rating': rating, 'rater_gender': rater_ud['gender'], 'rater_first_name': rater_ud['first_name']}
         if not send_album(target_id, rater_ud['photos'], rp):
-            bot.send_message(target_id, f"{rater_ud['first_name']} {gender_text} вас на **{rating}**", reply_markup=notification_keyboard(), parse_mode="Markdown")
+            try:
+                bot.send_message(target_id, f"{rater_ud['first_name']} {gender_text} вас на **{rating}**", reply_markup=notification_keyboard(), parse_mode="Markdown")
+            except:
+                pass
         else:
-            bot.send_message(target_id, "Что дальше?", reply_markup=notification_keyboard())
+            try:
+                bot.send_message(target_id, "Что дальше?", reply_markup=notification_keyboard())
+            except:
+                pass
     
-    # 30% шанс показать рекламу перед следующей анкетой
-    if random.random() < 0.3:
+    # 5% шанс на рекламу
+    if random.random() < 0.05:
         bot.send_message(rater_id, "Заходите в ТГК - @moggvinchiktgk", reply_markup=ad_keyboard())
         with bot.retrieve_data(rater_id) as d:
             d['ad_mode'] = True
