@@ -140,17 +140,41 @@ def show_profile(message):
         bot.send_message(user_id, "У вас ещё нет анкеты. Создайте её!", reply_markup=start_keyboard())
         return
     
-    for media in user_data['photos']:
+    profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
+    
+    media_group = []
+    for i, media in enumerate(user_data['photos']):
         try:
-            bot.send_photo(user_id, media)
+            if i == 0:
+                media_group.append(telebot.types.InputMediaPhoto(media, caption=profile_text))
+            else:
+                media_group.append(telebot.types.InputMediaPhoto(media))
         except:
             try:
-                bot.send_video(user_id, media)
+                if i == 0:
+                    media_group.append(telebot.types.InputMediaVideo(media, caption=profile_text))
+                else:
+                    media_group.append(telebot.types.InputMediaVideo(media))
             except:
                 pass
     
-    profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
-    bot.send_message(user_id, profile_text, reply_markup=my_profile_keyboard())
+    if media_group:
+        try:
+            bot.send_media_group(user_id, media_group)
+        except:
+            for i, media in enumerate(user_data['photos']):
+                try:
+                    if i == 0:
+                        bot.send_photo(user_id, media, caption=profile_text)
+                    else:
+                        bot.send_photo(user_id, media)
+                except:
+                    try:
+                        bot.send_video(user_id, media)
+                    except:
+                        pass
+    
+    bot.send_message(user_id, "Ваша анкета", reply_markup=my_profile_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back(message):
@@ -194,17 +218,41 @@ def show_user_for_rating(rater_id, target_user):
     if not user_data:
         return
     
-    for media in user_data['photos']:
+    profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
+    
+    media_group = []
+    for i, media in enumerate(user_data['photos']):
         try:
-            bot.send_photo(rater_id, media)
+            if i == 0:
+                media_group.append(telebot.types.InputMediaPhoto(media, caption=profile_text))
+            else:
+                media_group.append(telebot.types.InputMediaPhoto(media))
         except:
             try:
-                bot.send_video(rater_id, media)
+                if i == 0:
+                    media_group.append(telebot.types.InputMediaVideo(media, caption=profile_text))
+                else:
+                    media_group.append(telebot.types.InputMediaVideo(media))
             except:
                 pass
     
-    profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
-    bot.send_message(rater_id, profile_text, reply_markup=rating_keyboard(user_data['gender']))
+    if media_group:
+        try:
+            bot.send_media_group(rater_id, media_group)
+        except:
+            for i, media in enumerate(user_data['photos']):
+                try:
+                    if i == 0:
+                        bot.send_photo(rater_id, media, caption=profile_text)
+                    else:
+                        bot.send_photo(rater_id, media)
+                except:
+                    try:
+                        bot.send_video(rater_id, media)
+                    except:
+                        pass
+    
+    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
     
     with bot.retrieve_data(rater_id) as data:
         data['rating_target'] = user_data['user_id']
@@ -241,16 +289,38 @@ def process_rating(message):
         }
     
     if rater_data['photos']:
-        for media in rater_data['photos']:
+        rater_profile = f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}"
+        media_group = []
+        for i, media in enumerate(rater_data['photos']):
             try:
-                bot.send_photo(target_id, media)
+                if i == 0:
+                    media_group.append(telebot.types.InputMediaPhoto(media, caption=rater_profile))
+                else:
+                    media_group.append(telebot.types.InputMediaPhoto(media))
             except:
                 try:
-                    bot.send_video(target_id, media)
+                    if i == 0:
+                        media_group.append(telebot.types.InputMediaVideo(media, caption=rater_profile))
+                    else:
+                        media_group.append(telebot.types.InputMediaVideo(media))
                 except:
                     pass
         
-        bot.send_message(target_id, f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}")
+        if media_group:
+            try:
+                bot.send_media_group(target_id, media_group)
+            except:
+                for i, media in enumerate(rater_data['photos']):
+                    try:
+                        if i == 0:
+                            bot.send_photo(target_id, media, caption=rater_profile)
+                        else:
+                            bot.send_photo(target_id, media)
+                    except:
+                        try:
+                            bot.send_video(target_id, media)
+                        except:
+                            pass
     
     try:
         bot.send_message(target_id, message_text, reply_markup=notification_keyboard())
@@ -281,22 +351,43 @@ def request_chat(call):
     user_data = get_user_data(user)
     
     if user_data and user_data['photos']:
-        for media in user_data['photos']:
-            try:
-                bot.send_photo(rater_id, media)
-            except:
-                try:
-                    bot.send_video(rater_id, media)
-                except:
-                    pass
-        
         contact_text = f"{user_data['first_name']} хочет пообщаться!"
         if user_data['username']:
             contact_text += f" - @{user_data['username']}"
         else:
             contact_text += " -"
         
-        bot.send_message(rater_id, contact_text)
+        media_group = []
+        for i, media in enumerate(user_data['photos']):
+            try:
+                if i == 0:
+                    media_group.append(telebot.types.InputMediaPhoto(media, caption=contact_text))
+                else:
+                    media_group.append(telebot.types.InputMediaPhoto(media))
+            except:
+                try:
+                    if i == 0:
+                        media_group.append(telebot.types.InputMediaVideo(media, caption=contact_text))
+                    else:
+                        media_group.append(telebot.types.InputMediaVideo(media))
+                except:
+                    pass
+        
+        if media_group:
+            try:
+                bot.send_media_group(rater_id, media_group)
+            except:
+                for i, media in enumerate(user_data['photos']):
+                    try:
+                        if i == 0:
+                            bot.send_photo(rater_id, media, caption=contact_text)
+                        else:
+                            bot.send_photo(rater_id, media)
+                    except:
+                        try:
+                            bot.send_video(rater_id, media)
+                        except:
+                            pass
     
     bot.answer_callback_query(call.id, "Запрос отправлен!")
     bot.send_message(user_id, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
