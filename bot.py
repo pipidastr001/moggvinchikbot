@@ -1,7 +1,6 @@
 import telebot
 from telebot import custom_filters
 from telebot.storage import StateMemoryStorage
-from collections import deque
 import json
 import database
 from keyboards import *
@@ -12,8 +11,6 @@ TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
 
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
-
-rating_notifications = {}
 
 def get_user_data(user):
     if not user:
@@ -82,12 +79,6 @@ def process_photos(message):
         
         if count >= 3:
             finish_photos_upload(user_id)
-        else:
-            bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или напишите Готово")
-
-@bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
-def finish_photos_text(message):
-    finish_photos_upload(message.from_user.id)
 
 def finish_photos_upload(user_id):
     with bot.retrieve_data(user_id) as data:
@@ -98,41 +89,6 @@ def finish_photos_upload(user_id):
             return
         
         database.db.update_photos(user_id, photos)
-    
-    # Переходим к выбору ника
-    bot.set_state(user_id, RegistrationStates.waiting_for_name)
-    
-    user = database.db.get_user(user_id)
-    user_data = get_user_data(user)
-    tg_name = user_data['first_name'] if user_data else "Пользователь"
-    
-    bot.send_message(
-        user_id,
-        f"Как вас отображать в анкете?\n\nВаше имя в Telegram: {tg_name}",
-        reply_markup=name_keyboard()
-    )
-
-@bot.message_handler(state=RegistrationStates.waiting_for_name, func=lambda message: message.text == "Взять из Telegram")
-def use_telegram_name(message):
-    user_id = message.from_user.id
-    user = database.db.get_user(user_id)
-    
-    # Обновляем имя в базе на имя из Telegram
-    database.db.update_name(user_id, message.from_user.first_name)
-    
-    bot.delete_state(user_id)
-    bot.send_message(user_id, "Отлично! Ваши фото загружены. Идём моггать!", reply_markup=main_menu_keyboard())
-
-@bot.message_handler(state=RegistrationStates.waiting_for_name)
-def set_custom_name(message):
-    user_id = message.from_user.id
-    custom_name = message.text.strip()
-    
-    if len(custom_name) > 50:
-        bot.send_message(user_id, "Имя слишком длинное. Напишите до 50 символов.")
-        return
-    
-    database.db.update_name(user_id, custom_name)
     
     bot.delete_state(user_id)
     bot.send_message(user_id, "Отлично! Ваши фото загружены. Идём моггать!", reply_markup=main_menu_keyboard())
@@ -187,10 +143,6 @@ def start_rating(message):
         bot.send_message(user_id, "Сначала создайте анкету!", reply_markup=start_keyboard())
         return
     
-    if user_id in rating_notifications and rating_notifications[user_id]:
-        send_next_notification(user_id)
-        return
-    
     queue = get_queue_for_user(user_id)
     next_user = queue.get_next_user(user_id)
     
@@ -243,18 +195,33 @@ def process_rating(message):
     rater = database.db.get_user(rater_id)
     rater_data = get_user_data(rater)
     
-    if target_id not in rating_notifications:
-        rating_notifications[target_id] = deque()
+    # Отправляем уведомление
+    gender_text = "Оценила" if rater_data['gender'] == 'Ж' else "Оценил"
+    message_text = f"{rater_data['first_name']} {gender_text} вас на {rating}"
     
-    rating_notifications[target_id].append({
-        'rater_id': rater_id,
-        'rating': rating,
-        'rater_gender': rater_data['gender'] if rater_data else 'М',
-        'rater_first_name': rater_data['first_name'] if rater_data else 'Пользователь'
-    })
+    with bot.retrieve_data(target_id) as data:
+        data['current_notification'] = {
+            'rater_id': rater_id,
+            'rating': rating,
+            'rater_gender': rater_data['gender'],
+            'rater_first_name': rater_data['first_name']
+        }
+    
+    # Показываем анкету оценщика
+    if rater_data['photos']:
+        for media in rater_data['photos']:
+            try:
+                bot.send_photo(target_id, media)
+            except:
+                try:
+                    bot.send_video(target_id, media)
+                except:
+                    pass
+        
+        bot.send_message(target_id, f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}")
     
     try:
-        send_next_notification(target_id)
+        bot.send_message(target_id, message_text, reply_markup=notification_keyboard())
     except:
         pass
     
@@ -265,36 +232,6 @@ def process_rating(message):
         show_user_for_rating(rater_id, next_user)
     else:
         bot.send_message(rater_id, "Анкеты закончились. Начните заново!", reply_markup=main_menu_keyboard())
-
-def send_next_notification(user_id):
-    if user_id not in rating_notifications or not rating_notifications[user_id]:
-        return
-    
-    notification = rating_notifications[user_id].popleft()
-    
-    gender_text = "Оценила" if notification['rater_gender'] == 'Ж' else "Оценил"
-    
-    message_text = f"{notification['rater_first_name']} {gender_text} вас на {notification['rating']}"
-    
-    with bot.retrieve_data(user_id) as data:
-        data['current_notification'] = notification
-    
-    rater = database.db.get_user(notification['rater_id'])
-    rater_data = get_user_data(rater)
-    
-    if rater_data and rater_data['photos']:
-        for media in rater_data['photos']:
-            try:
-                bot.send_photo(user_id, media)
-            except:
-                try:
-                    bot.send_video(user_id, media)
-                except:
-                    pass
-        
-        bot.send_message(user_id, f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}")
-    
-    bot.send_message(user_id, message_text, reply_markup=notification_keyboard())
 
 @bot.callback_query_handler(func=lambda call: call.data == "request_chat")
 def request_chat(call):
@@ -330,27 +267,17 @@ def request_chat(call):
         bot.send_message(rater_id, contact_text)
     
     bot.answer_callback_query(call.id, "Запрос отправлен!")
-    
-    if user_id in rating_notifications and rating_notifications[user_id]:
-        send_next_notification(user_id)
-    else:
-        bot.send_message(user_id, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
+    bot.send_message(user_id, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
 
 @bot.callback_query_handler(func=lambda call: call.data == "next_rating")
 def next_rating(call):
     user_id = call.from_user.id
     bot.answer_callback_query(call.id, "Дальше")
-    
-    if user_id in rating_notifications and rating_notifications[user_id]:
-        send_next_notification(user_id)
-    else:
-        bot.send_message(user_id, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
+    bot.send_message(user_id, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
 
 @bot.callback_query_handler(func=lambda call: call.data == "skip_all")
 def skip_all(call):
     user_id = call.from_user.id
-    if user_id in rating_notifications:
-        rating_notifications[user_id].clear()
     bot.send_message(user_id, "Все рейты пропущены", reply_markup=main_menu_keyboard())
     bot.answer_callback_query(call.id, "Пропущено")
 
