@@ -6,11 +6,15 @@ import database
 from keyboards import *
 from states import RegistrationStates
 from ratings import get_queue_for_user
+import time
 
 TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
 
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
+
+# Защита от спама оценками
+last_rating_time = {}
 
 def get_user_data(user):
     if not user:
@@ -25,6 +29,35 @@ def get_user_data(user):
         'avg_rating': user[6],
         'is_active': user[7]
     }
+
+def send_album(chat_id, photos, caption):
+    """Отправляет фото альбомом с подписью на первом фото"""
+    if not photos:
+        return False
+    
+    media_group = []
+    for i, media in enumerate(photos):
+        try:
+            if i == 0:
+                media_group.append(telebot.types.InputMediaPhoto(media, caption=caption))
+            else:
+                media_group.append(telebot.types.InputMediaPhoto(media))
+        except:
+            try:
+                if i == 0:
+                    media_group.append(telebot.types.InputMediaVideo(media, caption=caption))
+                else:
+                    media_group.append(telebot.types.InputMediaVideo(media))
+            except:
+                pass
+    
+    if media_group:
+        try:
+            bot.send_media_group(chat_id, media_group)
+            return True
+        except:
+            pass
+    return False
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -141,44 +174,14 @@ def show_profile(message):
         return
     
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
-    
-    media_group = []
-    for i, media in enumerate(user_data['photos']):
-        try:
-            if i == 0:
-                media_group.append(telebot.types.InputMediaPhoto(media, caption=profile_text))
-            else:
-                media_group.append(telebot.types.InputMediaPhoto(media))
-        except:
-            try:
-                if i == 0:
-                    media_group.append(telebot.types.InputMediaVideo(media, caption=profile_text))
-                else:
-                    media_group.append(telebot.types.InputMediaVideo(media))
-            except:
-                pass
-    
-    if media_group:
-        try:
-            bot.send_media_group(user_id, media_group)
-        except:
-            for i, media in enumerate(user_data['photos']):
-                try:
-                    if i == 0:
-                        bot.send_photo(user_id, media, caption=profile_text)
-                    else:
-                        bot.send_photo(user_id, media)
-                except:
-                    try:
-                        bot.send_video(user_id, media)
-                    except:
-                        pass
+    send_album(user_id, user_data['photos'], profile_text)
     
     bot.send_message(user_id, "Ваша анкета", reply_markup=my_profile_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Назад")
 def go_back(message):
     user_id = message.from_user.id
+    bot.delete_state(user_id)
     bot.send_message(user_id, "Главное меню", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Изменить анкету")
@@ -192,7 +195,6 @@ def edit_profile(message):
 def delete_profile(message):
     user_id = message.from_user.id
     database.db.delete_user(user_id)
-    database.db.create_user(user_id, message.from_user.username, message.from_user.first_name)
     bot.send_message(user_id, "Анкета удалена. Для создания новой нажмите кнопку ниже", reply_markup=start_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Рейтить")
@@ -219,38 +221,7 @@ def show_user_for_rating(rater_id, target_user):
         return
     
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
-    
-    media_group = []
-    for i, media in enumerate(user_data['photos']):
-        try:
-            if i == 0:
-                media_group.append(telebot.types.InputMediaPhoto(media, caption=profile_text))
-            else:
-                media_group.append(telebot.types.InputMediaPhoto(media))
-        except:
-            try:
-                if i == 0:
-                    media_group.append(telebot.types.InputMediaVideo(media, caption=profile_text))
-                else:
-                    media_group.append(telebot.types.InputMediaVideo(media))
-            except:
-                pass
-    
-    if media_group:
-        try:
-            bot.send_media_group(rater_id, media_group)
-        except:
-            for i, media in enumerate(user_data['photos']):
-                try:
-                    if i == 0:
-                        bot.send_photo(rater_id, media, caption=profile_text)
-                    else:
-                        bot.send_photo(rater_id, media)
-                except:
-                    try:
-                        bot.send_video(rater_id, media)
-                    except:
-                        pass
+    send_album(rater_id, user_data['photos'], profile_text)
     
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard_with_back(user_data['gender']))
     
@@ -265,6 +236,13 @@ def process_rating(message):
     rater_id = message.from_user.id
     rating = message.text
     
+    # Защита от спама: минимум 1 секунда между оценками
+    now = time.time()
+    if rater_id in last_rating_time:
+        if now - last_rating_time[rater_id] < 1:
+            return  # Игнорируем слишком частые оценки
+    last_rating_time[rater_id] = now
+    
     with bot.retrieve_data(rater_id) as data:
         target_id = data.get('rating_target')
     
@@ -278,54 +256,29 @@ def process_rating(message):
     rater_data = get_user_data(rater)
     
     gender_text = "Оценила" if rater_data['gender'] == 'Ж' else "Оценил"
-    message_text = f"{rater_data['first_name']} {gender_text} вас на {rating}"
     
-    with bot.retrieve_data(target_id) as data:
-        data['current_notification'] = {
-            'rater_id': rater_id,
-            'rating': rating,
-            'rater_gender': rater_data['gender'],
-            'rater_first_name': rater_data['first_name']
-        }
-    
+    # Отправляем уведомление с анкетой и оценкой в одном альбоме
     if rater_data['photos']:
-        rater_profile = f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}"
-        media_group = []
-        for i, media in enumerate(rater_data['photos']):
-            try:
-                if i == 0:
-                    media_group.append(telebot.types.InputMediaPhoto(media, caption=rater_profile))
-                else:
-                    media_group.append(telebot.types.InputMediaPhoto(media))
-            except:
-                try:
-                    if i == 0:
-                        media_group.append(telebot.types.InputMediaVideo(media, caption=rater_profile))
-                    else:
-                        media_group.append(telebot.types.InputMediaVideo(media))
-                except:
-                    pass
+        rater_profile = f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}\n\n{rater_data['first_name']} {gender_text} вас на {rating}"
         
-        if media_group:
+        with bot.retrieve_data(target_id) as target_data:
+            target_data['current_notification'] = {
+                'rater_id': rater_id,
+                'rating': rating,
+                'rater_gender': rater_data['gender'],
+                'rater_first_name': rater_data['first_name']
+            }
+        
+        if send_album(target_id, rater_data['photos'], rater_profile):
             try:
-                bot.send_media_group(target_id, media_group)
+                bot.send_message(target_id, "Что дальше?", reply_markup=notification_keyboard())
             except:
-                for i, media in enumerate(rater_data['photos']):
-                    try:
-                        if i == 0:
-                            bot.send_photo(target_id, media, caption=rater_profile)
-                        else:
-                            bot.send_photo(target_id, media)
-                    except:
-                        try:
-                            bot.send_video(target_id, media)
-                        except:
-                            pass
-    
-    try:
-        bot.send_message(target_id, message_text, reply_markup=notification_keyboard())
-    except:
-        pass
+                pass
+        else:
+            try:
+                bot.send_message(target_id, f"{rater_data['first_name']} {gender_text} вас на {rating}", reply_markup=notification_keyboard())
+            except:
+                pass
     
     queue = get_queue_for_user(rater_id)
     next_user = queue.get_next_user(rater_id)
@@ -357,37 +310,7 @@ def request_chat(call):
         else:
             contact_text += " -"
         
-        media_group = []
-        for i, media in enumerate(user_data['photos']):
-            try:
-                if i == 0:
-                    media_group.append(telebot.types.InputMediaPhoto(media, caption=contact_text))
-                else:
-                    media_group.append(telebot.types.InputMediaPhoto(media))
-            except:
-                try:
-                    if i == 0:
-                        media_group.append(telebot.types.InputMediaVideo(media, caption=contact_text))
-                    else:
-                        media_group.append(telebot.types.InputMediaVideo(media))
-                except:
-                    pass
-        
-        if media_group:
-            try:
-                bot.send_media_group(rater_id, media_group)
-            except:
-                for i, media in enumerate(user_data['photos']):
-                    try:
-                        if i == 0:
-                            bot.send_photo(rater_id, media, caption=contact_text)
-                        else:
-                            bot.send_photo(rater_id, media)
-                    except:
-                        try:
-                            bot.send_video(rater_id, media)
-                        except:
-                            pass
+        send_album(rater_id, user_data['photos'], contact_text)
     
     bot.answer_callback_query(call.id, "Запрос отправлен!")
     bot.send_message(user_id, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
