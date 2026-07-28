@@ -39,11 +39,6 @@ def back_keyboard():
     keyboard.add(types.KeyboardButton("Назад"))
     return keyboard
 
-def name_keyboard():
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(types.KeyboardButton("Взять из Telegram"))
-    return keyboard
-
 def notification_keyboard():
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
