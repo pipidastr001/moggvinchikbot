@@ -80,7 +80,7 @@ def process_photos(message):
         if count >= 3:
             finish_photos_upload(user_id)
         else:
-            bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или напишите Готово")
+            bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или напишите Готово", reply_markup=done_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
 def finish_photos_text(message):
