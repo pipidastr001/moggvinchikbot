@@ -37,11 +37,8 @@ def start(message):
     
     database.db.create_user(user_id, username, first_name)
     
-    if user_id in rating_notifications and rating_notifications[user_id]:
-        send_next_notification(user_id)
-    else:
-        welcome_text = "Привет! Я Моггвинчик - бот для рейта внешности\n\nСоздай анкету, чтобы тебя могли рейтить"
-        bot.send_message(user_id, welcome_text, reply_markup=start_keyboard())
+    welcome_text = "Привет! Я Моггвинчик - бот для рейта внешности\n\nСоздай анкету, чтобы тебя могли рейтить"
+    bot.send_message(user_id, welcome_text, reply_markup=start_keyboard())
 
 @bot.message_handler(func=lambda message: message.text == "Создать анкету")
 def create_profile(message):
@@ -61,7 +58,7 @@ def process_gender(message):
     database.db.update_gender(user_id, gender)
     bot.set_state(user_id, RegistrationStates.waiting_for_photos)
     
-    bot.send_message(user_id, "Отлично! Отправьте ваши реальные фото (1-3)\n\nКогда закончите, нажмите кнопку Готово", reply_markup=done_keyboard())
+    bot.send_message(user_id, "Отлично! Отправьте ваши реальные фото (1-3). После отправки нажмите Готово", reply_markup=done_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, content_types=['photo', 'video'])
 def process_photos(message):
@@ -81,7 +78,7 @@ def process_photos(message):
             data['photos'].append(message.video.file_id)
         
         count = len(data['photos'])
-        bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или нажмите Готово")
+        bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или нажмите Готово", reply_markup=done_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
 def finish_photos_button(message):
@@ -92,7 +89,7 @@ def finish_photos_upload(user_id):
         photos = data.get('photos', [])
         
         if not photos:
-            bot.send_message(user_id, "Вы не отправили фото, отправьте хотя бы одно")
+            bot.send_message(user_id, "Вы не отправили ни одного фото. Отправьте хотя бы одно", reply_markup=done_keyboard())
             return
         
         database.db.update_photos(user_id, photos)
@@ -162,9 +159,10 @@ def show_user_for_rating(rater_id, target_user):
     user_data = get_user_data(target_user)
     
     if not user_data:
+        bot.send_message(rater_id, "Ошибка загрузки анкеты")
         return
     
-    # СНАЧАЛА ОТПРАВЛЯЕМ ФОТО
+    # СНАЧАЛА ФОТО
     for media in user_data['photos']:
         try:
             bot.send_photo(rater_id, media)
@@ -174,14 +172,14 @@ def show_user_for_rating(rater_id, target_user):
             except:
                 pass
     
-    # ПОТОМ ИНФУ
+    # ИНФО
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
     bot.send_message(rater_id, profile_text)
     
-    # ПОТОМ КНОПКИ ОЦЕНОК
+    # КНОПКИ ОЦЕНОК
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
     
-    # КНОПКА НАЗАД ВНИЗУ
+    # КНОПКА НАЗАД
     bot.send_message(rater_id, "Нажмите Назад чтобы выйти в главное меню", reply_markup=back_keyboard())
     
     with bot.retrieve_data(rater_id) as data:
@@ -219,8 +217,8 @@ def process_rating(message):
     
     try:
         send_next_notification(target_id)
-    except Exception as e:
-        print(f"Notification error: {e}")
+    except:
+        pass
     
     queue = get_queue_for_user(rater_id)
     next_user = queue.get_next_user(rater_id)
@@ -237,10 +235,8 @@ def send_next_notification(user_id):
     notification = rating_notifications[user_id].popleft()
     
     gender_text = "Оценила" if notification['rater_gender'] == 'Ж' else "Оценил"
-    rating = notification['rating']
-    rater_name = notification['rater_first_name']
     
-    message_text = f"{rater_name} {gender_text} вас на {rating}"
+    message_text = f"{notification['rater_first_name']} {gender_text} вас на {notification['rating']}"
     
     with bot.retrieve_data(user_id) as data:
         data['current_notification'] = notification
@@ -258,13 +254,9 @@ def send_next_notification(user_id):
                 except:
                     pass
         
-        rater_profile = f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}"
-        bot.send_message(user_id, rater_profile)
+        bot.send_message(user_id, f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}")
     
-    try:
-        bot.send_message(user_id, message_text, reply_markup=notification_keyboard())
-    except Exception as e:
-        print(f"Failed to send notification to {user_id}: {e}")
+    bot.send_message(user_id, message_text, reply_markup=notification_keyboard())
 
 @bot.callback_query_handler(func=lambda call: call.data == "request_chat")
 def request_chat(call):
@@ -274,7 +266,7 @@ def request_chat(call):
         notification = data.get('current_notification')
     
     if not notification:
-        bot.answer_callback_query(call.id, "Ошибка. Уведомление не найдено.")
+        bot.answer_callback_query(call.id, "Ошибка")
         return
     
     rater_id = notification['rater_id']
@@ -292,7 +284,6 @@ def request_chat(call):
                     pass
         
         contact_text = f"{user_data['first_name']} хочет пообщаться!"
-        
         if user_data['username']:
             contact_text += f" - @{user_data['username']}"
         else:
