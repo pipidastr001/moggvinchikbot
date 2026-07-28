@@ -58,7 +58,7 @@ def process_gender(message):
     database.db.update_gender(user_id, gender)
     bot.set_state(user_id, RegistrationStates.waiting_for_photos)
     
-    bot.send_message(user_id, "Отлично! Отправьте ваши реальные фото (1-3). После отправки нажмите Готово", reply_markup=done_keyboard())
+    bot.send_message(user_id, "Отлично! Отправьте ваши реальные фото (1-3)")
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, content_types=['photo', 'video'])
 def process_photos(message):
@@ -69,7 +69,8 @@ def process_photos(message):
             data['photos'] = []
         
         if len(data['photos']) >= 3:
-            bot.send_message(user_id, "Нельзя отправлять более 3 фото. Нажмите Готово чтобы завершить.")
+            bot.send_message(user_id, "Нельзя отправлять более 3 фото")
+            finish_photos_upload(user_id)
             return
         
         if message.content_type == 'photo':
@@ -78,10 +79,14 @@ def process_photos(message):
             data['photos'].append(message.video.file_id)
         
         count = len(data['photos'])
-        bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или нажмите Готово", reply_markup=done_keyboard())
+        
+        if count >= 3:
+            finish_photos_upload(user_id)
+        else:
+            bot.send_message(user_id, f"Фото {count}/3 загружено. Отправьте ещё или нажмите любую кнопку для завершения")
 
-@bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda message: message.text == "Готово")
-def finish_photos_button(message):
+@bot.message_handler(state=RegistrationStates.waiting_for_photos)
+def finish_photos_any(message):
     finish_photos_upload(message.from_user.id)
 
 def finish_photos_upload(user_id):
@@ -89,7 +94,7 @@ def finish_photos_upload(user_id):
         photos = data.get('photos', [])
         
         if not photos:
-            bot.send_message(user_id, "Вы не отправили ни одного фото. Отправьте хотя бы одно", reply_markup=done_keyboard())
+            bot.send_message(user_id, "Вы не отправили фото, отправьте хотя бы одно")
             return
         
         database.db.update_photos(user_id, photos)
@@ -114,7 +119,7 @@ def show_profile(message):
             try:
                 bot.send_video(user_id, media)
             except:
-                bot.send_message(user_id, "Не удалось загрузить медиа")
+                pass
     
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
     bot.send_message(user_id, profile_text, reply_markup=my_profile_keyboard())
@@ -147,6 +152,11 @@ def start_rating(message):
         bot.send_message(user_id, "Сначала создайте анкету!", reply_markup=start_keyboard())
         return
     
+    # Сначала проверяем неотправленные уведомления
+    if user_id in rating_notifications and rating_notifications[user_id]:
+        send_next_notification(user_id)
+        return
+    
     queue = get_queue_for_user(user_id)
     next_user = queue.get_next_user(user_id)
     
@@ -159,10 +169,8 @@ def show_user_for_rating(rater_id, target_user):
     user_data = get_user_data(target_user)
     
     if not user_data:
-        bot.send_message(rater_id, "Ошибка загрузки анкеты")
         return
     
-    # СНАЧАЛА ФОТО
     for media in user_data['photos']:
         try:
             bot.send_photo(rater_id, media)
@@ -172,14 +180,10 @@ def show_user_for_rating(rater_id, target_user):
             except:
                 pass
     
-    # ИНФО
     profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
     bot.send_message(rater_id, profile_text)
     
-    # КНОПКИ ОЦЕНОК
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(user_data['gender']))
-    
-    # КНОПКА НАЗАД
     bot.send_message(rater_id, "Нажмите Назад чтобы выйти в главное меню", reply_markup=back_keyboard())
     
     with bot.retrieve_data(rater_id) as data:
@@ -205,16 +209,18 @@ def process_rating(message):
     rater = database.db.get_user(rater_id)
     rater_data = get_user_data(rater)
     
+    # СОХРАНЯЕМ УВЕДОМЛЕНИЕ В ОЧЕРЕДЬ
     if target_id not in rating_notifications:
         rating_notifications[target_id] = deque()
     
-    rating_notifications[target_id].appendleft({
+    rating_notifications[target_id].append({
         'rater_id': rater_id,
         'rating': rating,
         'rater_gender': rater_data['gender'] if rater_data else 'М',
         'rater_first_name': rater_data['first_name'] if rater_data else 'Пользователь'
     })
     
+    # ПЫТАЕМСЯ ОТПРАВИТЬ УВЕДОМЛЕНИЕ СРАЗУ
     try:
         send_next_notification(target_id)
     except:
