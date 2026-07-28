@@ -47,13 +47,6 @@ class Database:
         )
         self.conn.commit()
     
-    def update_name(self, user_id, name):
-        self.cursor.execute(
-            'UPDATE users SET first_name = ? WHERE user_id = ?',
-            (name, user_id)
-        )
-        self.conn.commit()
-    
     def add_rating(self, user_id, rating):
         user = self.get_user(user_id)
         if user:
