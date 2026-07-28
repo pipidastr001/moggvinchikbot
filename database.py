@@ -54,7 +54,6 @@ class Database:
             ratings.append(rating)
             ratings_json = json.dumps(ratings)
             
-            # Считаем самую частую оценку
             if ratings:
                 most_common = Counter(ratings).most_common(1)[0][0]
                 avg_rating = most_common
@@ -66,9 +65,7 @@ class Database:
                 (ratings_json, avg_rating, user_id)
             )
             self.conn.commit()
-            print(f"DEBUG: Added rating {rating} for user {user_id}. Total ratings: {ratings}, Avg: {avg_rating}")
             return True
-        print(f"DEBUG: User {user_id} not found in database")
         return False
     
     def get_user(self, user_id):
