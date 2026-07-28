@@ -25,3 +25,8 @@ def get_queue_for_user(user_id):
     q = RatingQueue()
     q.users_pool = get_all_users_for_rating(user_id)
     return q
+
+def get_queue_for_user(user_id):
+    q = RatingQueue()
+    q.users_pool = get_all_users_for_rating(user_id)
+    return q
