@@ -13,7 +13,6 @@ TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
 
-# Защита от спама оценками
 last_rating_time = {}
 
 def get_user_data(user):
@@ -31,7 +30,6 @@ def get_user_data(user):
     }
 
 def send_album(chat_id, photos, caption):
-    """Отправляет фото альбомом с подписью на первом фото"""
     if not photos:
         return False
     
@@ -39,13 +37,13 @@ def send_album(chat_id, photos, caption):
     for i, media in enumerate(photos):
         try:
             if i == 0:
-                media_group.append(telebot.types.InputMediaPhoto(media, caption=caption))
+                media_group.append(telebot.types.InputMediaPhoto(media, caption=caption, parse_mode="Markdown"))
             else:
                 media_group.append(telebot.types.InputMediaPhoto(media))
         except:
             try:
                 if i == 0:
-                    media_group.append(telebot.types.InputMediaVideo(media, caption=caption))
+                    media_group.append(telebot.types.InputMediaVideo(media, caption=caption, parse_mode="Markdown"))
                 else:
                     media_group.append(telebot.types.InputMediaVideo(media))
             except:
@@ -67,8 +65,8 @@ def start(message):
     
     database.db.create_user(user_id, username, first_name)
     
-    welcome_text = "Привет! Я Моггвинчик - бот для рейта внешности\n\nСоздай анкету, чтобы тебя могли рейтить"
-    bot.send_message(user_id, welcome_text, reply_markup=start_keyboard())
+    welcome_text = "Привет! Я **Моггвинчик** - бот для рейта внешности\n\nСоздай **анкету**, чтобы тебя могли рейтить"
+    bot.send_message(user_id, welcome_text, reply_markup=start_keyboard(), parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text == "Создать анкету")
 def create_profile(message):
@@ -88,7 +86,7 @@ def process_gender(message):
     database.db.update_gender(user_id, gender)
     bot.set_state(user_id, RegistrationStates.waiting_for_photos)
     
-    bot.send_message(user_id, "Отлично! Отправьте ваши реальные фото (1-3)")
+    bot.send_message(user_id, "Отлично! Отправьте ваши **реальные фото** (1-3)", parse_mode="Markdown")
 
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, content_types=['photo', 'video'])
 def process_photos(message):
@@ -124,7 +122,7 @@ def finish_photos_upload(user_id):
         photos = data.get('photos', [])
         
         if not photos:
-            bot.send_message(user_id, "Вы не отправили фото, отправьте хотя бы одно")
+            bot.send_message(user_id, "Вы не отправили фото, отправьте **хотя бы одно**", parse_mode="Markdown")
             return
         
         database.db.update_photos(user_id, photos)
@@ -170,10 +168,10 @@ def show_profile(message):
     user_data = get_user_data(user)
     
     if not user_data or not user_data['photos']:
-        bot.send_message(user_id, "У вас ещё нет анкеты. Создайте её!", reply_markup=start_keyboard())
+        bot.send_message(user_id, "У вас ещё нет анкеты. **Создайте её!**", reply_markup=start_keyboard(), parse_mode="Markdown")
         return
     
-    profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
+    profile_text = f"{user_data['first_name']}\nСредний рейт: **{user_data['avg_rating']}**"
     send_album(user_id, user_data['photos'], profile_text)
     
     bot.send_message(user_id, "Ваша анкета", reply_markup=my_profile_keyboard())
@@ -203,7 +201,7 @@ def start_rating(message):
     user_data = get_user_data(database.db.get_user(user_id))
     
     if not user_data or not user_data['photos']:
-        bot.send_message(user_id, "Сначала создайте анкету!", reply_markup=start_keyboard())
+        bot.send_message(user_id, "**Сначала создайте анкету!**", reply_markup=start_keyboard(), parse_mode="Markdown")
         return
     
     queue = get_queue_for_user(user_id)
@@ -220,7 +218,7 @@ def show_user_for_rating(rater_id, target_user):
     if not user_data:
         return
     
-    profile_text = f"{user_data['first_name']}\nСредний рейт: {user_data['avg_rating']}"
+    profile_text = f"{user_data['first_name']}\nСредний рейт: **{user_data['avg_rating']}**"
     send_album(rater_id, user_data['photos'], profile_text)
     
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard_with_back(user_data['gender']))
@@ -236,18 +234,17 @@ def process_rating(message):
     rater_id = message.from_user.id
     rating = message.text
     
-    # Защита от спама: минимум 1 секунда между оценками
     now = time.time()
     if rater_id in last_rating_time:
         if now - last_rating_time[rater_id] < 1:
-            return  # Игнорируем слишком частые оценки
+            return
     last_rating_time[rater_id] = now
     
     with bot.retrieve_data(rater_id) as data:
         target_id = data.get('rating_target')
     
     if not target_id:
-        bot.send_message(rater_id, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
+        bot.send_message(rater_id, "**Ошибка.** Начните рейт заново", reply_markup=main_menu_keyboard(), parse_mode="Markdown")
         return
     
     database.db.add_rating(target_id, rating)
@@ -257,9 +254,8 @@ def process_rating(message):
     
     gender_text = "Оценила" if rater_data['gender'] == 'Ж' else "Оценил"
     
-    # Отправляем уведомление с анкетой и оценкой в одном альбоме
     if rater_data['photos']:
-        rater_profile = f"{rater_data['first_name']}\nСредний рейт: {rater_data['avg_rating']}\n\n{rater_data['first_name']} {gender_text} вас на {rating}"
+        rater_profile = f"{rater_data['first_name']}\nСредний рейт: **{rater_data['avg_rating']}**\n\n{rater_data['first_name']} {gender_text} вас на **{rating}**"
         
         with bot.retrieve_data(target_id) as target_data:
             target_data['current_notification'] = {
@@ -276,7 +272,7 @@ def process_rating(message):
                 pass
         else:
             try:
-                bot.send_message(target_id, f"{rater_data['first_name']} {gender_text} вас на {rating}", reply_markup=notification_keyboard())
+                bot.send_message(target_id, f"{rater_data['first_name']} {gender_text} вас на **{rating}**", reply_markup=notification_keyboard(), parse_mode="Markdown")
             except:
                 pass
     
