@@ -8,12 +8,25 @@ from states import RegistrationStates
 from ratings import get_queue_for_user
 import time
 import random
+import gc
 
 TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
 last_rating_time = {}
 rating_targets = {}
+
+# Очистка старых состояний каждые 10 минут
+def clean_old_states():
+    while True:
+        time.sleep(600)
+        try:
+            gc.collect()
+        except:
+            pass
+
+import threading
+threading.Thread(target=clean_old_states, daemon=True).start()
 
 def get_user_data(u):
     if not u: return None
@@ -287,5 +300,12 @@ def skip_all_button(message):
 if __name__ == "__main__":
     print("Бот Моггвинчик запущен!")
     bot.add_custom_filter(custom_filters.StateFilter(bot))
-    bot.remove_webhook()
-    bot.infinity_polling()
+    
+    # Пробуем бесконечно перезапускаться при падении
+    while True:
+        try:
+            bot.remove_webhook()
+            bot.infinity_polling()
+        except Exception as e:
+            print(f"Бот упал: {e}")
+            time.sleep(5)
