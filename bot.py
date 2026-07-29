@@ -115,10 +115,18 @@ def finish_photos_upload(uid):
             bot.send_message(uid, "Вы не отправили фото, отправьте **хотя бы одно**", parse_mode="Markdown", reply_markup=done_keyboard())
             return
         database.db.update_photos(uid, photos)
+    
     bot.set_state(uid, RegistrationStates.waiting_for_name)
     u = database.db.get_user(uid)
     ud = get_user_data(u)
-    bot.send_message(uid, f"Как вас отображать в анкете?\n\nВаше имя в Telegram: {ud['first_name']}", reply_markup=name_keyboard())
+    
+    if not ud:
+        bot.send_message(uid, "Ошибка. Попробуйте создать анкету заново", reply_markup=start_keyboard())
+        bot.delete_state(uid)
+        return
+    
+    tg_name = ud['first_name'] if ud['first_name'] else "Пользователь"
+    bot.send_message(uid, f"Как вас отображать в анкете?\n\nВаше имя в Telegram: {tg_name}", reply_markup=name_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_name, func=lambda m: m.text == "Взять из Telegram")
 def use_tg_name(message):
