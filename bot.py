@@ -8,25 +8,27 @@ from states import RegistrationStates
 from ratings import get_queue_for_user
 import time
 import random
-import gc
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# HTTP-сервер для Render (чтобы не убивал процесс)
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def start_server():
+    server = HTTPServer(('0.0.0.0', 10000), Handler)
+    server.serve_forever()
+
+threading.Thread(target=start_server, daemon=True).start()
 
 TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
 last_rating_time = {}
 rating_targets = {}
-
-# Очистка старых состояний каждые 10 минут
-def clean_old_states():
-    while True:
-        time.sleep(600)
-        try:
-            gc.collect()
-        except:
-            pass
-
-import threading
-threading.Thread(target=clean_old_states, daemon=True).start()
 
 def get_user_data(u):
     if not u: return None
@@ -301,11 +303,10 @@ if __name__ == "__main__":
     print("Бот Моггвинчик запущен!")
     bot.add_custom_filter(custom_filters.StateFilter(bot))
     
-    # Пробуем бесконечно перезапускаться при падении
     while True:
         try:
             bot.remove_webhook()
             bot.infinity_polling()
         except Exception as e:
-            print(f"Бот упал: {e}")
+            print(f"Упал: {e}")
             time.sleep(5)
