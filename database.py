@@ -2,6 +2,7 @@ import sqlite3
 import json
 from collections import Counter
 import os
+from datetime import datetime, timedelta
 
 class Database:
     def __init__(self):
@@ -26,6 +27,13 @@ class Database:
                 ratings TEXT,
                 avg_rating TEXT DEFAULT 'Нет оценок',
                 is_active INTEGER DEFAULT 1
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS bans (
+                user_id INTEGER PRIMARY KEY,
+                banned_until TEXT,
+                banned_by INTEGER
             )
         ''')
         conn.commit()
@@ -110,6 +118,30 @@ class Database:
         conn = self.get_conn()
         c = conn.cursor()
         c.execute('UPDATE users SET is_active = 0, photos = NULL, ratings = NULL, avg_rating = "Нет оценок", gender = NULL, description = "" WHERE user_id = ?', (user_id,))
+        conn.commit()
+        conn.close()
+    
+    def ban_user(self, user_id, days, banned_by):
+        conn = self.get_conn()
+        c = conn.cursor()
+        banned_until = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        c.execute('INSERT OR REPLACE INTO bans (user_id, banned_until, banned_by) VALUES (?, ?, ?)', (user_id, banned_until, banned_by))
+        self.delete_user(user_id)
+        conn.commit()
+        conn.close()
+    
+    def get_ban(self, user_id):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('SELECT * FROM bans WHERE user_id = ?', (user_id,))
+        ban = c.fetchone()
+        conn.close()
+        return ban
+    
+    def unban_user(self, user_id):
+        conn = self.get_conn()
+        c = conn.cursor()
+        c.execute('DELETE FROM bans WHERE user_id = ?', (user_id,))
         conn.commit()
         conn.close()
 
