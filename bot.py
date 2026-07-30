@@ -3,57 +3,48 @@ import json
 import time
 import random
 import threading
+from datetime import datetime
 from flask import Flask
 
 import telebot
 from telebot import custom_filters
 from telebot.storage import StateMemoryStorage
 
-# Импорт ваших локальных модулей (раскомментируйте при необходимости)
 import database
 from keyboards import *
 from states import RegistrationStates
 from ratings import get_queue_for_user
 
 # ==========================================
-# 1. FLASK ВЕБ-СЕРВЕР ДЛЯ RENDER (HEALTH CHECK)
+# FLASK ДЛЯ RENDER
 # ==========================================
 app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    # Render отправляет GET запрос сюда. Возвращаем 200 OK.
     return "OK", 200
 
-
 # ==========================================
-# 2. ИНИЦИАЛИЗАЦИЯ И КОНФИГУРАЦИЯ БОТА
+# КОНФИГУРАЦИЯ
 # ==========================================
-# Получаем токен из переменных окружения (Environment Variables в Render)
 TOKEN = os.getenv("BOT_TOKEN", "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg")
+OWNER_ID = 8055769849
+MODERATORS = [8055769849, 942032958]
 
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
-
 last_rating_time = {}
 rating_targets = {}
+pending_reports = {}
 
 MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
 FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
 ALL_RATINGS = MALE_RATINGS + FEMALE_RATINGS
 
-
-# ==========================================
-# 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ==========================================
 def get_user_data(u):
-    if not u:
-        return None
+    if not u: return None
     return {
-        'user_id': u[0],
-        'username': u[1],
-        'first_name': u[2],
-        'gender': u[3],
+        'user_id': u[0], 'username': u[1], 'first_name': u[2], 'gender': u[3],
         'photos': json.loads(u[4]) if u[4] else [],
         'description': u[5] if len(u) > 5 else '',
         'ratings': json.loads(u[6]) if len(u) > 6 and u[6] else [],
@@ -62,21 +53,14 @@ def get_user_data(u):
     }
 
 def send_album(chat_id, photos, caption):
-    if not photos:
-        return False
+    if not photos: return False
     media = []
     for i, p in enumerate(photos):
         try:
-            media.append(
-                telebot.types.InputMediaPhoto(p, caption=caption, parse_mode="Markdown")
-                if i == 0 else telebot.types.InputMediaPhoto(p)
-            )
+            media.append(telebot.types.InputMediaPhoto(p, caption=caption, parse_mode="Markdown") if i == 0 else telebot.types.InputMediaPhoto(p))
         except:
             try:
-                media.append(
-                    telebot.types.InputMediaVideo(p, caption=caption, parse_mode="Markdown")
-                    if i == 0 else telebot.types.InputMediaVideo(p)
-                )
+                media.append(telebot.types.InputMediaVideo(p, caption=caption, parse_mode="Markdown") if i == 0 else telebot.types.InputMediaVideo(p))
             except:
                 pass
     if media:
@@ -92,6 +76,26 @@ def build_profile_text(ud):
     if ud.get('description'):
         txt += f"\n{ud['description']}"
     return txt
+
+def get_ban_time_left(user_id):
+    ban = database.db.get_ban(user_id)
+    if not ban:
+        return None
+    banned_until = datetime.strptime(ban[1], "%Y-%m-%d %H:%M:%S")
+    now = datetime.now()
+    if now >= banned_until:
+        database.db.unban_user(user_id)
+        return None
+    diff = banned_until - now
+    days = diff.days
+    hours = diff.seconds // 3600
+    minutes = (diff.seconds % 3600) // 60
+    if days > 0:
+        return f"{days} дн. {hours} ч."
+    elif hours > 0:
+        return f"{hours} ч. {minutes} мин."
+    else:
+        return f"{minutes} мин."
 
 def finish_photos_upload(uid):
     with bot.retrieve_data(uid) as d:
@@ -123,15 +127,27 @@ def show_next_rating(uid):
 
 def show_user_for_rating(rater_id, target):
     ud = get_user_data(target)
-    if not ud:
-        return
+    if not ud: return
     rating_targets[rater_id] = ud['user_id']
     send_album(rater_id, ud['photos'], build_profile_text(ud))
     bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
 
+def notify_moderators(reporter_ud, target_ud):
+    """Отправляет жалобу всем модераторам"""
+    for mod_id in MODERATORS:
+        try:
+            bot.send_message(mod_id, f"⚠️ {reporter_ud['first_name']} пожаловался на {target_ud['first_name']}")
+            send_album(mod_id, target_ud['photos'], build_profile_text(target_ud))
+            pending_reports[mod_id] = {
+                'target_id': target_ud['user_id'],
+                'target_name': target_ud['first_name']
+            }
+            bot.send_message(mod_id, "Выберите действие:", reply_markup=ban_keyboard())
+        except:
+            pass
 
 # ==========================================
-# 4. ОБРАБОТЧИКИ КОМАНД И СООБЩЕНИЙ
+# ОБРАБОТЧИКИ
 # ==========================================
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -143,6 +159,13 @@ def start(message):
 @bot.message_handler(func=lambda m: m.text == "Создать анкету")
 def create_profile(message):
     uid = message.from_user.id
+    
+    # Проверка бана
+    ban_time = get_ban_time_left(uid)
+    if ban_time:
+        bot.send_message(uid, f"Вы сможете создать анкету только через {ban_time}")
+        return
+    
     bot.set_state(uid, RegistrationStates.waiting_for_gender)
     bot.send_message(uid, "Выберите ваш пол", reply_markup=gender_keyboard())
 
@@ -266,6 +289,66 @@ def ad_next(message):
     uid = message.from_user.id
     show_next_rating(uid)
 
+@bot.message_handler(func=lambda m: m.text == "Пожаловаться")
+def report_user(message):
+    uid = message.from_user.id
+    target_id = rating_targets.get(uid)
+    
+    if not target_id:
+        bot.send_message(uid, "Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
+        return
+    
+    reporter_ud = get_user_data(database.db.get_user(uid))
+    target_ud = get_user_data(database.db.get_user(target_id))
+    
+    if not reporter_ud or not target_ud:
+        bot.send_message(uid, "Ошибка")
+        return
+    
+    notify_moderators(reporter_ud, target_ud)
+    bot.send_message(uid, "Жалоба отправлена модератору")
+    show_next_rating(uid)
+
+@bot.message_handler(func=lambda m: m.text == "Бан")
+def ban_user(message):
+    uid = message.from_user.id
+    
+    if uid not in MODERATORS:
+        bot.send_message(uid, "У вас нет прав для этого действия")
+        return
+    
+    report = pending_reports.get(uid)
+    if not report:
+        bot.send_message(uid, "Нет активных жалоб")
+        return
+    
+    target_id = report['target_id']
+    
+    # Модер не может банить владельца или другого модера
+    if target_id == OWNER_ID:
+        bot.send_message(uid, "Ошибка: нельзя забанить владельца")
+        return
+    if target_id in MODERATORS and uid != OWNER_ID:
+        bot.send_message(uid, "Ошибка: нельзя забанить модератора")
+        return
+    
+    database.db.ban_user(target_id, 3, uid)
+    pending_reports.pop(uid, None)
+    
+    try:
+        bot.send_message(target_id, "Ваша анкета была удалена модератором")
+    except:
+        pass
+    
+    bot.send_message(uid, "Пользователь забанен на 3 дня", reply_markup=main_menu_keyboard())
+
+@bot.message_handler(func=lambda m: m.text == "Пропустить")
+def skip_report(message):
+    uid = message.from_user.id
+    if uid in MODERATORS:
+        pending_reports.pop(uid, None)
+        bot.send_message(uid, "Жалоба пропущена", reply_markup=main_menu_keyboard())
+
 @bot.message_handler(func=lambda m: m.text in ALL_RATINGS)
 def process_rating(message):
     rater_id = message.from_user.id
@@ -337,30 +420,23 @@ def skip_all_button(message):
     uid = message.from_user.id
     bot.send_message(uid, "Все рейты пропущены", reply_markup=main_menu_keyboard())
 
-
 # ==========================================
-# 5. ФУНКЦИЯ ФОНОВОГО ЗАПУСКА БОТА
+# ЗАПУСК
 # ==========================================
 def run_bot():
     bot.add_custom_filter(custom_filters.StateFilter(bot))
-    print("Инициализация телеграм бота...")
+    print("Инициализация бота...")
     while True:
         try:
             bot.remove_webhook()
             print("Бот Моггвинчик запущен!")
             bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
-            print(f"Ошибка в infinity_polling: {e}")
+            print(f"Ошибка: {e}")
             time.sleep(5)
 
-
-# Запускаем бота в отдельном фоновом потоке
 threading.Thread(target=run_bot, daemon=True).start()
 
-
-# ==========================================
-# 6. ТОЧКА ВХОДА (ДЛЯ ЛОКАЛЬНОГО ТЕСТА)
-# ==========================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
