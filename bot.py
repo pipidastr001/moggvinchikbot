@@ -1,39 +1,59 @@
+import os
+import json
+import time
+import random
+import threading
+from flask import Flask
+
 import telebot
 from telebot import custom_filters
 from telebot.storage import StateMemoryStorage
-import json
+
+# Импорт ваших локальных модулей (раскомментируйте при необходимости)
 import database
 from keyboards import *
 from states import RegistrationStates
 from ratings import get_queue_for_user
-import time
-import random
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# HTTP-сервер для Render (чтобы не убивал процесс)
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
+# ==========================================
+# 1. FLASK ВЕБ-СЕРВЕР ДЛЯ RENDER (HEALTH CHECK)
+# ==========================================
+app = Flask(__name__)
 
-def start_server():
-    server = HTTPServer(('0.0.0.0', 10000), Handler)
-    server.serve_forever()
+@app.route('/')
+def health_check():
+    # Render отправляет GET запрос сюда. Возвращаем 200 OK.
+    return "OK", 200
 
-threading.Thread(target=start_server, daemon=True).start()
 
-TOKEN = "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg"
+# ==========================================
+# 2. ИНИЦИАЛИЗАЦИЯ И КОНФИГУРАЦИЯ БОТА
+# ==========================================
+# Получаем токен из переменных окружения (Environment Variables в Render)
+TOKEN = os.getenv("BOT_TOKEN", "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg")
+
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
+
 last_rating_time = {}
 rating_targets = {}
 
+MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
+FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
+ALL_RATINGS = MALE_RATINGS + FEMALE_RATINGS
+
+
+# ==========================================
+# 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ==========================================
 def get_user_data(u):
-    if not u: return None
+    if not u:
+        return None
     return {
-        'user_id': u[0], 'username': u[1], 'first_name': u[2], 'gender': u[3],
+        'user_id': u[0],
+        'username': u[1],
+        'first_name': u[2],
+        'gender': u[3],
         'photos': json.loads(u[4]) if u[4] else [],
         'description': u[5] if len(u) > 5 else '',
         'ratings': json.loads(u[6]) if len(u) > 6 and u[6] else [],
@@ -42,14 +62,21 @@ def get_user_data(u):
     }
 
 def send_album(chat_id, photos, caption):
-    if not photos: return False
+    if not photos:
+        return False
     media = []
     for i, p in enumerate(photos):
         try:
-            media.append(telebot.types.InputMediaPhoto(p, caption=caption, parse_mode="Markdown") if i == 0 else telebot.types.InputMediaPhoto(p))
+            media.append(
+                telebot.types.InputMediaPhoto(p, caption=caption, parse_mode="Markdown")
+                if i == 0 else telebot.types.InputMediaPhoto(p)
+            )
         except:
             try:
-                media.append(telebot.types.InputMediaVideo(p, caption=caption, parse_mode="Markdown") if i == 0 else telebot.types.InputMediaVideo(p))
+                media.append(
+                    telebot.types.InputMediaVideo(p, caption=caption, parse_mode="Markdown")
+                    if i == 0 else telebot.types.InputMediaVideo(p)
+                )
             except:
                 pass
     if media:
@@ -60,10 +87,52 @@ def send_album(chat_id, photos, caption):
             pass
     return False
 
-MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
-FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
-ALL_RATINGS = MALE_RATINGS + FEMALE_RATINGS
+def build_profile_text(ud):
+    txt = f"{ud['first_name']}\nСредний рейт: **{ud['avg_rating']}**"
+    if ud.get('description'):
+        txt += f"\n{ud['description']}"
+    return txt
 
+def finish_photos_upload(uid):
+    with bot.retrieve_data(uid) as d:
+        photos = d.get('photos', [])
+        if not photos:
+            bot.send_message(uid, "Вы не отправили фото, отправьте **хотя бы одно**", parse_mode="Markdown", reply_markup=done_keyboard())
+            return
+        database.db.update_photos(uid, photos)
+    
+    bot.set_state(uid, RegistrationStates.waiting_for_name)
+    u = database.db.get_user(uid)
+    ud = get_user_data(u)
+    
+    if not ud:
+        bot.send_message(uid, "Ошибка. Попробуйте создать анкету заново", reply_markup=start_keyboard())
+        bot.delete_state(uid)
+        return
+    
+    tg_name = ud['first_name'] if ud['first_name'] else "Пользователь"
+    bot.send_message(uid, f"Как вас отображать в анкете?\n\nВаше имя в Telegram: {tg_name}", reply_markup=name_keyboard())
+
+def show_next_rating(uid):
+    q = get_queue_for_user(uid)
+    nxt = q.get_next_user(uid)
+    if nxt:
+        show_user_for_rating(uid, nxt)
+    else:
+        bot.send_message(uid, "Пока нет доступных анкет для рейта. Попробуйте позже", reply_markup=main_menu_keyboard())
+
+def show_user_for_rating(rater_id, target):
+    ud = get_user_data(target)
+    if not ud:
+        return
+    rating_targets[rater_id] = ud['user_id']
+    send_album(rater_id, ud['photos'], build_profile_text(ud))
+    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
+
+
+# ==========================================
+# 4. ОБРАБОТЧИКИ КОМАНД И СООБЩЕНИЙ
+# ==========================================
 @bot.message_handler(commands=['start'])
 def start(message):
     uid = message.from_user.id
@@ -107,26 +176,6 @@ def process_photos(message):
 @bot.message_handler(state=RegistrationStates.waiting_for_photos, func=lambda m: m.text == "Готово")
 def finish_photos_text(message):
     finish_photos_upload(message.from_user.id)
-
-def finish_photos_upload(uid):
-    with bot.retrieve_data(uid) as d:
-        photos = d.get('photos', [])
-        if not photos:
-            bot.send_message(uid, "Вы не отправили фото, отправьте **хотя бы одно**", parse_mode="Markdown", reply_markup=done_keyboard())
-            return
-        database.db.update_photos(uid, photos)
-    
-    bot.set_state(uid, RegistrationStates.waiting_for_name)
-    u = database.db.get_user(uid)
-    ud = get_user_data(u)
-    
-    if not ud:
-        bot.send_message(uid, "Ошибка. Попробуйте создать анкету заново", reply_markup=start_keyboard())
-        bot.delete_state(uid)
-        return
-    
-    tg_name = ud['first_name'] if ud['first_name'] else "Пользователь"
-    bot.send_message(uid, f"Как вас отображать в анкете?\n\nВаше имя в Telegram: {tg_name}", reply_markup=name_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_name, func=lambda m: m.text == "Взять из Telegram")
 def use_tg_name(message):
@@ -173,12 +222,6 @@ def set_description(message):
         d['desc'] = desc
     bot.send_message(uid, "Описание сохранено. Нажмите Готово чтобы завершить, или Пропустить чтобы не добавлять", reply_markup=desc_keyboard())
 
-def build_profile_text(ud):
-    txt = f"{ud['first_name']}\nСредний рейт: **{ud['avg_rating']}**"
-    if ud.get('description'):
-        txt += f"\n{ud['description']}"
-    return txt
-
 @bot.message_handler(func=lambda m: m.text == "Моя анкета")
 def show_profile(message):
     uid = message.from_user.id
@@ -218,25 +261,10 @@ def start_rating(message):
     
     show_next_rating(uid)
 
-def show_next_rating(uid):
-    q = get_queue_for_user(uid)
-    nxt = q.get_next_user(uid)
-    if nxt:
-        show_user_for_rating(uid, nxt)
-    else:
-        bot.send_message(uid, "Пока нет доступных анкет для рейта. Попробуйте позже", reply_markup=main_menu_keyboard())
-
 @bot.message_handler(func=lambda m: m.text == "Дальше")
 def ad_next(message):
     uid = message.from_user.id
     show_next_rating(uid)
-
-def show_user_for_rating(rater_id, target):
-    ud = get_user_data(target)
-    if not ud: return
-    rating_targets[rater_id] = ud['user_id']
-    send_album(rater_id, ud['photos'], build_profile_text(ud))
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
 
 @bot.message_handler(func=lambda m: m.text in ALL_RATINGS)
 def process_rating(message):
@@ -267,8 +295,10 @@ def process_rating(message):
         rp = f"{rater_ud['first_name']}\nСредний рейт: **{rater_ud['avg_rating']}**\n\n{rater_ud['first_name']} {gender_text} вас на **{rating}**"
         if rater_ud.get('description'):
             rp = f"{rater_ud['first_name']}\nСредний рейт: **{rater_ud['avg_rating']}**\n{rater_ud['description']}\n\n{rater_ud['first_name']} {gender_text} вас на **{rating}**"
+        
         with bot.retrieve_data(target_id) as td:
             td['current_notification'] = {'rater_id': rater_id, 'rating': rating, 'rater_gender': rater_ud['gender'], 'rater_first_name': rater_ud['first_name']}
+        
         if not send_album(target_id, rater_ud['photos'], rp):
             try:
                 bot.send_message(target_id, f"{rater_ud['first_name']} {gender_text} вас на **{rating}**", reply_markup=notification_keyboard(), parse_mode="Markdown")
@@ -307,14 +337,30 @@ def skip_all_button(message):
     uid = message.from_user.id
     bot.send_message(uid, "Все рейты пропущены", reply_markup=main_menu_keyboard())
 
-if __name__ == "__main__":
-    print("Бот Моггвинчик запущен!")
+
+# ==========================================
+# 5. ФУНКЦИЯ ФОНОВОГО ЗАПУСКА БОТА
+# ==========================================
+def run_bot():
     bot.add_custom_filter(custom_filters.StateFilter(bot))
-    
+    print("Инициализация телеграм бота...")
     while True:
         try:
             bot.remove_webhook()
-            bot.infinity_polling()
+            print("Бот Моггвинчик запущен!")
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
-            print(f"Упал: {e}")
+            print(f"Ошибка в infinity_polling: {e}")
             time.sleep(5)
+
+
+# Запускаем бота в отдельном фоновом потоке
+threading.Thread(target=run_bot, daemon=True).start()
+
+
+# ==========================================
+# 6. ТОЧКА ВХОДА (ДЛЯ ЛОКАЛЬНОГО ТЕСТА)
+# ==========================================
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
