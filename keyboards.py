@@ -29,6 +29,7 @@ def rating_keyboard(gender):
     else:
         for r in ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]:
             k.add(types.KeyboardButton(r))
+    k.add(types.KeyboardButton("Пожаловаться"))
     k.add(types.KeyboardButton("Назад"))
     return k
 
@@ -56,4 +57,9 @@ def notification_keyboard():
     k = types.ReplyKeyboardMarkup(resize_keyboard=True)
     k.add(types.KeyboardButton("Запросить общение"))
     k.add(types.KeyboardButton("Дальше"), types.KeyboardButton("Пропустить всех"))
+    return k
+
+def ban_keyboard():
+    k = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    k.add(types.KeyboardButton("Бан"), types.KeyboardButton("Пропустить"))
     return k
