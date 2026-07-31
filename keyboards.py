@@ -33,6 +33,19 @@ def rating_keyboard(gender):
     k.add(types.KeyboardButton("Назад"))
     return k
 
+def moderator_rating_keyboard(gender):
+    k = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    if str(gender) == "M":
+        for r in ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]:
+            k.add(types.KeyboardButton(r))
+    else:
+        for r in ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]:
+            k.add(types.KeyboardButton(r))
+    k.add(types.KeyboardButton("Пожаловаться"))
+    k.add(types.KeyboardButton("Бан"))
+    k.add(types.KeyboardButton("Назад"))
+    return k
+
 def name_keyboard():
     k = types.ReplyKeyboardMarkup(resize_keyboard=True)
     k.add(types.KeyboardButton("Взять из Telegram"))
