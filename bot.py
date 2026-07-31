@@ -13,10 +13,10 @@ from telebot.storage import StateMemoryStorage
 import database
 from keyboards import *
 from states import RegistrationStates
-from ratings import get_queue_for_user
+from ratings import get_queue_for_user, reset_queue_for_user
 
 # ==========================================
-# FLASK ДЛЯ RENDER
+# FLASK
 # ==========================================
 app = Flask(__name__)
 
@@ -36,6 +36,8 @@ bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
 last_rating_time = {}
 rating_targets = {}
 pending_reports = {}
+user_rated_list = {}  # {user_id: {target_id: timestamp}}
+RATING_COOLDOWN = 600  # 10 минут
 
 MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
 FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
@@ -97,6 +99,17 @@ def get_ban_time_left(user_id):
     else:
         return f"{minutes} мин."
 
+def can_rate_user(rater_id, target_id):
+    """Проверяет можно ли рейтить цель (раз в 10 минут)"""
+    now = time.time()
+    if rater_id not in user_rated_list:
+        user_rated_list[rater_id] = {}
+    if target_id in user_rated_list[rater_id]:
+        if now - user_rated_list[rater_id][target_id] < RATING_COOLDOWN:
+            return False
+    user_rated_list[rater_id][target_id] = now
+    return True
+
 def finish_photos_upload(uid):
     with bot.retrieve_data(uid) as d:
         photos = d.get('photos', [])
@@ -121,19 +134,27 @@ def show_next_rating(uid):
     q = get_queue_for_user(uid)
     nxt = q.get_next_user(uid)
     if nxt:
-        show_user_for_rating(uid, nxt)
+        target_id = nxt[0]
+        if can_rate_user(uid, target_id):
+            show_user_for_rating(uid, nxt)
+        else:
+            show_next_rating(uid)
     else:
-        bot.send_message(uid, "Пока нет доступных анкет для рейта. Попробуйте позже", reply_markup=main_menu_keyboard())
+        bot.send_message(uid, "Все анкеты закончились, попробуйте позже", reply_markup=main_menu_keyboard())
 
 def show_user_for_rating(rater_id, target):
     ud = get_user_data(target)
     if not ud: return
     rating_targets[rater_id] = ud['user_id']
     send_album(rater_id, ud['photos'], build_profile_text(ud))
-    bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
+    
+    # Выбираем клавиатуру в зависимости от роли
+    if rater_id in MODERATORS:
+        bot.send_message(rater_id, "Выберите оценку:", reply_markup=moderator_rating_keyboard(ud['gender']))
+    else:
+        bot.send_message(rater_id, "Выберите оценку:", reply_markup=rating_keyboard(ud['gender']))
 
 def notify_moderators(reporter_ud, target_ud):
-    """Отправляет жалобу всем модераторам"""
     for mod_id in MODERATORS:
         try:
             bot.send_message(mod_id, f"⚠️ {reporter_ud['first_name']} пожаловался на {target_ud['first_name']}")
@@ -160,7 +181,6 @@ def start(message):
 def create_profile(message):
     uid = message.from_user.id
     
-    # Проверка бана
     ban_time = get_ban_time_left(uid)
     if ban_time:
         bot.send_message(uid, f"Вы сможете создать анкету только через {ban_time}")
@@ -278,6 +298,9 @@ def start_rating(message):
         bot.send_message(uid, "**Сначала создайте анкету!**", reply_markup=start_keyboard(), parse_mode="Markdown")
         return
     
+    # Сбрасываем очередь чтобы получить свежие анкеты
+    reset_queue_for_user(uid)
+    
     if random.random() < 0.05:
         bot.send_message(uid, "Заходите в ТГК - @moggvinchiktgk", reply_markup=ad_keyboard())
         return
@@ -310,30 +333,40 @@ def report_user(message):
     show_next_rating(uid)
 
 @bot.message_handler(func=lambda m: m.text == "Бан")
-def ban_user(message):
+def ban_user_handler(message):
     uid = message.from_user.id
+    
+    # Проверяем: модер жмёт Бан в рейте или через жалобу
+    target_id = None
+    
+    # Сначала проверяем pending_reports
+    report = pending_reports.get(uid)
+    if report:
+        target_id = report['target_id']
+    
+    # Если нет репорта, может модер банит из рейта
+    if not target_id:
+        target_id = rating_targets.get(uid)
+    
+    if not target_id:
+        bot.send_message(uid, "Нет цели для бана")
+        return
     
     if uid not in MODERATORS:
         bot.send_message(uid, "У вас нет прав для этого действия")
         return
     
-    report = pending_reports.get(uid)
-    if not report:
-        bot.send_message(uid, "Нет активных жалоб")
-        return
-    
-    target_id = report['target_id']
-    
-    # Модер не может банить владельца или другого модера
     if target_id == OWNER_ID:
         bot.send_message(uid, "Ошибка: нельзя забанить владельца")
         return
+    
     if target_id in MODERATORS and uid != OWNER_ID:
         bot.send_message(uid, "Ошибка: нельзя забанить модератора")
         return
     
     database.db.ban_user(target_id, 3, uid)
     pending_reports.pop(uid, None)
+    rating_targets.pop(uid, None)
     
     try:
         bot.send_message(target_id, "Ваша анкета была удалена модератором")
