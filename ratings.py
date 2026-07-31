@@ -21,7 +21,13 @@ class RatingQueue:
             return u
         return None
 
+user_queues = {}
+
 def get_queue_for_user(user_id):
-    q = RatingQueue()
-    q.users_pool = get_all_users_for_rating(user_id)
-    return q
+    if user_id not in user_queues:
+        user_queues[user_id] = RatingQueue()
+    return user_queues[user_id]
+
+def reset_queue_for_user(user_id):
+    if user_id in user_queues:
+        del user_queues[user_id]
