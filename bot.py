@@ -9,24 +9,19 @@ from flask import Flask
 import telebot
 from telebot import custom_filters
 from telebot.storage import StateMemoryStorage
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import database
 from keyboards import *
 from states import RegistrationStates
 from ratings import get_queue_for_user, reset_queue_for_user
 
-# ==========================================
-# FLASK
-# ==========================================
 app = Flask(__name__)
 
 @app.route('/')
 def health_check():
     return "OK", 200
 
-# ==========================================
-# КОНФИГУРАЦИЯ
-# ==========================================
 TOKEN = os.getenv("BOT_TOKEN", "8969142782:AAEBPU3N3wgxO4OIYNYEfS7r36gBMXjVStg")
 OWNER_ID = 8055769849
 MODERATORS = [8055769849, 942032958]
@@ -36,8 +31,8 @@ bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
 last_rating_time = {}
 rating_targets = {}
 pending_reports = {}
-user_rated_list = {}  # {user_id: {target_id: timestamp}}
-RATING_COOLDOWN = 600  # 10 минут
+user_rated_list = {}
+RATING_COOLDOWN = 600
 
 MALE_RATINGS = ["Sub 3", "Sub 5", "LTN", "MTN", "HTN", "Chad", "True Adam"]
 FEMALE_RATINGS = ["Sub 3", "Sub 5", "LTB", "MTB", "HTB", "Stacy", "True Eve"]
@@ -74,7 +69,6 @@ def send_album(chat_id, photos, caption):
     return False
 
 def safe_send_message(chat_id, text, reply_markup=None, parse_mode="Markdown"):
-    """Безопасная отправка сообщений с обработкой блокировки бота пользователем"""
     try:
         return bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
     except telebot.apihelper.ApiTelegramException as e:
@@ -106,14 +100,13 @@ def get_ban_time_left(user_id):
     hours = diff.seconds // 3600
     minutes = (diff.seconds % 3600) // 60
     if days > 0:
-        return f"**{days} дн. {hours} ч.**"
+        return f"**{days}** дн. **{hours}** ч."
     elif hours > 0:
-        return f"**{hours} ч. {minutes} мин.**"
+        return f"**{hours}** ч. **{minutes}** мин."
     else:
-        return f"**{minutes} мин.**"
+        return f"**{minutes}** мин."
 
 def can_rate_user(rater_id, target_id):
-    """Проверяет можно ли рейтить цель (раз в 10 минут)"""
     now = time.time()
     if rater_id not in user_rated_list:
         user_rated_list[rater_id] = {}
@@ -136,7 +129,7 @@ def finish_photos_upload(uid):
     ud = get_user_data(u)
     
     if not ud:
-        safe_send_message(uid, "⚠️ **Ошибка.** Попробуйте создать анкету заново", reply_markup=start_keyboard())
+        safe_send_message(uid, "**Ошибка.** Попробуйте создать анкету заново", reply_markup=start_keyboard())
         bot.delete_state(uid)
         return
     
@@ -153,7 +146,7 @@ def show_next_rating(uid):
         else:
             show_next_rating(uid)
     else:
-        safe_send_message(uid, "Все анкеты закончились, попробуйте позже!", reply_markup=main_menu_keyboard())
+        safe_send_message(uid, "Все анкеты закончились, попробуйте позже", reply_markup=main_menu_keyboard())
 
 def show_user_for_rating(rater_id, target):
     ud = get_user_data(target)
@@ -161,7 +154,6 @@ def show_user_for_rating(rater_id, target):
     rating_targets[rater_id] = ud['user_id']
     send_album(rater_id, ud['photos'], build_profile_text(ud))
     
-    # Выбираем клавиатуру в зависимости от роли
     if rater_id in MODERATORS:
         safe_send_message(rater_id, "Выберите оценку:", reply_markup=moderator_rating_keyboard(ud['gender']))
     else:
@@ -169,16 +161,16 @@ def show_user_for_rating(rater_id, target):
 
 def notify_moderators(reporter_ud, target_ud):
     for mod_id in MODERATORS:
-        safe_send_message(mod_id, f"⚠️ **{reporter_ud['first_name']}** пожаловался на **{target_ud['first_name']}**")
+        safe_send_message(mod_id, f"{reporter_ud['first_name']} пожаловался на {target_ud['first_name']}")
         send_album(mod_id, target_ud['photos'], build_profile_text(target_ud))
         pending_reports[mod_id] = {
             'target_id': target_ud['user_id'],
             'target_name': target_ud['first_name']
         }
-        safe_send_message(mod_id, "Выберите действие:", reply_markup=ban_keyboard())
+        kb = InlineKeyboardMarkup()
+        kb.add(InlineKeyboardButton("Бан", callback_data=f"ban_{target_ud['user_id']}"))
+        safe_send_message(mod_id, "Выберите действие:", reply_markup=kb)
 
-# ==========================================
-# ОБРАБОТЧИКИ
 # ==========================================
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -193,7 +185,7 @@ def create_profile(message):
     
     ban_time = get_ban_time_left(uid)
     if ban_time:
-        safe_send_message(uid, f"🚫 Вы заблокированы. Вы сможете создать анкету через {ban_time}")
+        safe_send_message(uid, f"Вы заблокированы. Вы сможете создать анкету через {ban_time}")
         return
     
     bot.set_state(uid, RegistrationStates.waiting_for_gender)
@@ -235,7 +227,7 @@ def use_tg_name(message):
     uid = message.from_user.id
     database.db.update_name(uid, message.from_user.first_name)
     bot.set_state(uid, RegistrationStates.waiting_for_description)
-    safe_send_message(uid, "Добавьте описание (рост, вес, интересы — что угодно) или нажмите **Пропустить**", reply_markup=desc_keyboard())
+    safe_send_message(uid, "Добавьте описание (рост, вес, интересы) или нажмите **Пропустить**", reply_markup=desc_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_name)
 def set_custom_name(message):
@@ -246,14 +238,14 @@ def set_custom_name(message):
         return
     database.db.update_name(uid, name)
     bot.set_state(uid, RegistrationStates.waiting_for_description)
-    safe_send_message(uid, "Добавьте описание (рост, вес, интересы — что угодно) или нажмите **Пропустить**", reply_markup=desc_keyboard())
+    safe_send_message(uid, "Добавьте описание (рост, вес, интересы) или нажмите **Пропустить**", reply_markup=desc_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_description, func=lambda m: m.text == "Пропустить")
 def skip_description(message):
     uid = message.from_user.id
     database.db.update_description(uid, "")
     bot.delete_state(uid)
-    safe_send_message(uid, "🎉 Отлично! Ваша анкета создана. Идём моггать!", reply_markup=main_menu_keyboard())
+    safe_send_message(uid, "Отлично! Ваша анкета создана. Идём моггать!", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_description, func=lambda m: m.text == "Готово")
 def done_description(message):
@@ -262,7 +254,7 @@ def done_description(message):
         desc = d.get('desc', '')
     database.db.update_description(uid, desc)
     bot.delete_state(uid)
-    safe_send_message(uid, "🎉 Отлично! Ваша анкета создана. Идём моггать!", reply_markup=main_menu_keyboard())
+    safe_send_message(uid, "Отлично! Ваша анкета создана. Идём моггать!", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(state=RegistrationStates.waiting_for_description)
 def set_description(message):
@@ -305,10 +297,9 @@ def start_rating(message):
     uid = message.from_user.id
     ud = get_user_data(database.db.get_user(uid))
     if not ud or not ud['photos']:
-        safe_send_message(uid, "⚠️ **Сначала создайте анкету!**", reply_markup=start_keyboard())
+        safe_send_message(uid, "**Сначала создайте анкету!**", reply_markup=start_keyboard())
         return
     
-    # Сбрасываем очередь чтобы получить свежие анкеты
     reset_queue_for_user(uid)
     
     if random.random() < 0.05:
@@ -328,18 +319,18 @@ def report_user(message):
     target_id = rating_targets.get(uid)
     
     if not target_id:
-        safe_send_message(uid, "⚠️ Ошибка. Начните рейт заново", reply_markup=main_menu_keyboard())
+        safe_send_message(uid, "**Ошибка.** Начните рейт заново", reply_markup=main_menu_keyboard())
         return
     
     reporter_ud = get_user_data(database.db.get_user(uid))
     target_ud = get_user_data(database.db.get_user(target_id))
     
     if not reporter_ud or not target_ud:
-        safe_send_message(uid, "⚠️ Ошибка")
+        safe_send_message(uid, "**Ошибка**")
         return
     
     notify_moderators(reporter_ud, target_ud)
-    safe_send_message(uid, "Жалоба отправлена модератору.")
+    safe_send_message(uid, "Жалоба отправлена модератору")
     show_next_rating(uid)
 
 @bot.message_handler(func=lambda m: m.text == "Бан")
@@ -359,23 +350,48 @@ def ban_user_handler(message):
         return
     
     if uid not in MODERATORS:
-        safe_send_message(uid, "⚠️ У вас нет прав для этого действия")
+        safe_send_message(uid, "У вас нет прав для этого действия")
         return
     
     if target_id == OWNER_ID:
-        safe_send_message(uid, "⚠️ Ошибка: нельзя забанить владельца")
+        safe_send_message(uid, "**Ошибка:** нельзя забанить владельца")
         return
     
     if target_id in MODERATORS and uid != OWNER_ID:
-        safe_send_message(uid, "⚠️ Ошибка: нельзя забанить модератора")
+        safe_send_message(uid, "**Ошибка:** нельзя забанить модератора")
         return
     
     database.db.ban_user(target_id, 3, uid)
     pending_reports.pop(uid, None)
     rating_targets.pop(uid, None)
     
-    safe_send_message(target_id, "🚫 **Ваша анкета была удалена модератором.**")
+    safe_send_message(target_id, "**Ваша анкета была удалена модератором.**")
     safe_send_message(uid, "Пользователь забанен на **3 дня**", reply_markup=main_menu_keyboard())
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ban_"))
+def inline_ban(call):
+    uid = call.from_user.id
+    
+    if uid not in MODERATORS:
+        bot.answer_callback_query(call.id, "У вас нет прав")
+        return
+    
+    target_id = int(call.data.split("_")[1])
+    
+    if target_id == OWNER_ID:
+        bot.answer_callback_query(call.id, "Нельзя забанить владельца")
+        return
+    
+    if target_id in MODERATORS and uid != OWNER_ID:
+        bot.answer_callback_query(call.id, "Нельзя забанить модератора")
+        return
+    
+    database.db.ban_user(target_id, 3, uid)
+    pending_reports.pop(uid, None)
+    
+    safe_send_message(target_id, "**Ваша анкета была удалена модератором.**")
+    safe_send_message(uid, "Пользователь забанен на **3 дня**", reply_markup=main_menu_keyboard())
+    bot.answer_callback_query(call.id, "Пользователь забанен")
 
 @bot.message_handler(func=lambda m: m.text == "Пропустить")
 def skip_report(message):
@@ -410,7 +426,6 @@ def process_rating(message):
     gender_text = "оценила" if rater_ud['gender'] == 'Ж' else "оценил"
     
     if rater_ud['photos']:
-        # Текст с поддержкой жирного выделения
         rp = f"**{rater_ud['first_name']}**\nСредний рейт: **{rater_ud['avg_rating']}**\n\n**{rater_ud['first_name']}** {gender_text} вас на **{rating}**"
         if rater_ud.get('description'):
             rp = f"**{rater_ud['first_name']}**\nСредний рейт: **{rater_ud['avg_rating']}**\n{rater_ud['description']}\n\n**{rater_ud['first_name']}** {gender_text} вас на **{rating}**"
@@ -418,7 +433,6 @@ def process_rating(message):
         with bot.retrieve_data(target_id) as td:
             td['current_notification'] = {'rater_id': rater_id, 'rating': rating, 'rater_gender': rater_ud['gender'], 'rater_first_name': rater_ud['first_name']}
         
-        # Безопасная отправка уведомления пользователю, которого оценили
         if not send_album(target_id, rater_ud['photos'], rp):
             safe_send_message(target_id, f"**{rater_ud['first_name']}** {gender_text} вас на **{rating}**", reply_markup=notification_keyboard())
         else:
@@ -436,12 +450,12 @@ def request_chat_button(message):
     with bot.retrieve_data(uid) as d:
         notif = d.get('current_notification')
     if not notif:
-        safe_send_message(uid, "⚠️ Ошибка")
+        safe_send_message(uid, "**Ошибка**")
         return
     ud = get_user_data(database.db.get_user(uid))
     if ud and ud['photos']:
         username_str = f" - @{ud['username']}" if ud['username'] else ""
-        txt = f"💌 **{ud['first_name']}** хочет пообщаться!{username_str}"
+        txt = f"**{ud['first_name']}** хочет пообщаться!{username_str}"
         send_album(notif['rater_id'], ud['photos'], txt)
     safe_send_message(uid, "Запрос отправлен!")
     safe_send_message(uid, "Все рейты просмотрены", reply_markup=main_menu_keyboard())
@@ -452,8 +466,6 @@ def skip_all_button(message):
     safe_send_message(uid, "Все рейты пропущены", reply_markup=main_menu_keyboard())
 
 # ==========================================
-# ЗАПУСК
-# ==========================================
 def run_bot():
     bot.add_custom_filter(custom_filters.StateFilter(bot))
     print("Инициализация бота...")
@@ -463,7 +475,7 @@ def run_bot():
             print("Бот Моггвинчик запущен!")
             bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
-            print(f"Ошибка в цикле бота: {e}")
+            print(f"Ошибка: {e}")
             time.sleep(5)
 
 threading.Thread(target=run_bot, daemon=True).start()
